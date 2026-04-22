@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Image } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { supabase } from '../src/supabase';
+import { supabase } from '../src/supabase'; // Ajustado conforme seu VS Code
 
 export default function TelaEditarContagem() {
   const { id } = useLocalSearchParams();
@@ -10,38 +10,53 @@ export default function TelaEditarContagem() {
   const [carregando, setCarregando] = useState(true);
   const [itemData, setItemData] = useState<any>(null);
 
-  // Estados dos campos
+  // Estados para os campos (JSONB e Colunas Diretas)
   const [tubetes, setTubetes] = useState(0);
-  const [tara, setTara] = useState('');
+  const [tara, setTara] = useState('0');
   const [laminas, setLaminas] = useState(0);
   const [paletes, setPaletes] = useState(0);
-  const [pesoBruto, setPesoBruto] = useState('');
-  const [emLinha, setEmLinha] = useState('');
+  const [pesoBruto, setPesoBruto] = useState('0');
+  const [emLinha, setEmLinha] = useState('0');
   const [obs, setObs] = useState('');
+  const [fotoUrl, setFotoUrl] = useState<string | null>(null);
   const [pesoLiquido, setPesoLiquido] = useState(0);
 
   const carregarDados = async () => {
     try {
       const { data, error } = await supabase
         .from('contagens')
-        .select('*, itens(codigo_sap, descricao)')
+        .select('*, itens(descricao)')
         .eq('id', id)
         .single();
 
       if (error) throw error;
+
       if (data) {
         setItemData(data);
+        
+        // Lendo do JSONB detalhes_contagem
         const detalhes = data.detalhes_contagem || {};
         setTubetes(detalhes.tubetes || 0);
-        setTara(detalhes.tara_tubete ? String(detalhes.tara_tubete) : '0');
+        setTara(String(detalhes.tara_tubete || '0'));
         setLaminas(detalhes.laminas || 0);
         setPaletes(detalhes.paletes || 0);
-        setPesoBruto(data.peso_bruto ? String(data.peso_bruto) : '0');
-        setEmLinha(data.em_linha ? String(data.em_linha) : '0'); 
-        setObs(data.observacao === 'EMPTY' ? '' : data.observacao || '');
+        
+        // Colunas diretas
+        setPesoBruto(String(data.peso_bruto || '0'));
+        setEmLinha(String(data.em_linha || '0'));
+        setObs(data.observacao || '');
+
+        // BUSCA A FOTO NO BUCKET CORRETO: fotos_contagem
+        if (data.foto_url) {
+          const { data: urlData } = supabase.storage
+            .from('fotos_contagem') // Nome exato do seu print!
+            .getPublicUrl(data.foto_url);
+          
+          setFotoUrl(urlData.publicUrl);
+        }
       }
     } catch (err: any) {
-      Alert.alert("Erro", "Não foi possível carregar os dados.");
+      console.error("Erro ao carregar:", err.message);
     } finally {
       setCarregando(false);
     }
@@ -49,38 +64,30 @@ export default function TelaEditarContagem() {
 
   useEffect(() => { carregarDados(); }, [id]);
 
-  // ==========================================
-  // LÓGICA DE CÁLCULO CORRIGIDA (YPÊ STANDARD)
-  // ==========================================
+  // MATEMÁTICA YPÊ (Descontos fixos: Lâmina -0.4 | Palete -20)
   useEffect(() => {
     const bruto = parseFloat(pesoBruto) || 0;
-    const lin = parseFloat(emLinha) || 0;
-    
-    // Cálculos de Tara (Desconto)
-    const pesoA = tubetes * (parseFloat(tara) || 0);     // Tubetes
-    const pesoB = laminas * 0.400;                       // Lâminas (Padrão 400g)
-    const pesoC = paletes * 20.0;                        // Paletes (Padrão 20kg)
-    
-    const taraTotal = pesoA + pesoB + pesoC;
-    
-    // Peso Líquido = (Bruto - Descontos) + O que está fora da bobina
-    const calculo = (bruto - taraTotal) + lin;
-    
+    const descTubetes = (tubetes || 0) * (parseFloat(tara) || 0);
+    const descLaminas = (laminas || 0) * 0.4;
+    const descPaletes = (paletes || 0) * 20;
+    const somaLinha = parseFloat(emLinha) || 0;
+
+    const calculo = bruto - descTubetes - descLaminas - descPaletes + somaLinha;
     setPesoLiquido(calculo);
   }, [pesoBruto, tubetes, tara, emLinha, laminas, paletes]);
 
-  const salvarAlteracoes = async () => {
+  const salvar = async () => {
     try {
       const { error } = await supabase
         .from('contagens')
         .update({
-          peso_bruto: parseFloat(pesoBruto) || 0,
-          em_linha: parseFloat(emLinha) || 0,
+          peso_bruto: parseFloat(pesoBruto),
+          em_linha: parseFloat(emLinha),
           peso_liquido_calculado: pesoLiquido,
-          observacao: obs || 'EMPTY',
+          observacao: obs,
           detalhes_contagem: {
             tubetes: tubetes,
-            tara_tubete: parseFloat(tara) || 0,
+            tara_tubete: parseFloat(tara),
             laminas: laminas,
             paletes: paletes
           }
@@ -88,14 +95,14 @@ export default function TelaEditarContagem() {
         .eq('id', id);
 
       if (error) throw error;
-      Alert.alert("Sucesso", "Contagem atualizada!");
+      Alert.alert("Sucesso", "Alterações salvas no sistema!");
       router.back();
     } catch (err: any) {
       Alert.alert("Erro ao salvar", err.message);
     }
   };
 
-  const excluirContagem = () => {
+  const excluir = () => {
     Alert.alert("🗑️ Excluir", "Deseja apagar este registro?", [
       { text: "Cancelar", style: "cancel" },
       { text: "Excluir", style: "destructive", onPress: async () => {
@@ -113,9 +120,9 @@ export default function TelaEditarContagem() {
         <View style={styles.header}>
             <View style={styles.sapBadge}>
                 <MaterialCommunityIcons name="package-variant" size={18} color="#B45309" />
-                <Text style={styles.sapText}>{itemData?.itens?.codigo_sap}</Text>
+                <Text style={styles.sapText}>{itemData?.item_id}</Text>
             </View>
-            <TouchableOpacity onPress={excluirContagem}>
+            <TouchableOpacity onPress={excluir}>
                 <Ionicons name="trash-outline" size={26} color="#EF4444" />
             </TouchableOpacity>
         </View>
@@ -124,15 +131,20 @@ export default function TelaEditarContagem() {
         <View style={styles.grid}>
           <CardStepper label="N° Tubetes" value={tubetes} onAdd={() => setTubetes(tubetes+1)} onSub={() => setTubetes(Math.max(0, tubetes-1))} />
           <CardInput label="Tara Tubete" value={tara} onChange={setTara} color="#F59E0B" />
-          
-          <CardStepper label="Lâminas (0.4kg)" value={laminas} onAdd={() => setLaminas(laminas+1)} onSub={() => setLaminas(Math.max(0, laminas-1))} />
-          <CardStepper label="Paletes (20kg)" value={paletes} onAdd={() => setPaletes(paletes+1)} onSub={() => setPaletes(Math.max(0, paletes-1))} />
-          
+          <CardStepper label="Lâminas (-0.4)" value={laminas} onAdd={() => setLaminas(laminas+1)} onSub={() => setLaminas(Math.max(0, laminas-1))} />
+          <CardStepper label="Paletes (-20)" value={paletes} onAdd={() => setPaletes(paletes+1)} onSub={() => setPaletes(Math.max(0, paletes-1))} />
           <CardInput label="Peso Bruto" value={pesoBruto} onChange={setPesoBruto} color="#F59E0B" />
           <CardInput label="Em Linha" value={emLinha} onChange={setEmLinha} color="#10B981" />
         </View>
 
         <TextInput style={styles.obsInput} placeholder="Observação..." value={obs} onChangeText={setObs} multiline />
+
+        <View style={styles.photoContainer}>
+            <Text style={styles.photoLabel}>📸 Evidência da Contagem:</Text>
+            <View style={styles.photoFrame}>
+                {fotoUrl ? <Image source={{ uri: fotoUrl }} style={styles.image} /> : <Text style={styles.noPhoto}>Foto não encontrada</Text>}
+            </View>
+        </View>
 
         <View style={styles.finalCard}>
             <Text style={styles.finalLabel}>Peso Líquido Final:</Text>
@@ -141,12 +153,8 @@ export default function TelaEditarContagem() {
       </ScrollView>
 
       <View style={styles.footer}>
-        <TouchableOpacity style={styles.btnCancel} onPress={() => router.back()}>
-          <Text style={styles.txtCancel}>Cancelar</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.btnSave} onPress={salvarAlteracoes}>
-          <Text style={styles.txtSave}>Salvar</Text>
-        </TouchableOpacity>
+        <TouchableOpacity style={styles.btnCancel} onPress={() => router.back()}><Text style={styles.txtCancel}>Cancelar</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.btnSave} onPress={salvar}><Text style={styles.txtSave}>Salvar</Text></TouchableOpacity>
       </View>
     </View>
   );
@@ -185,7 +193,12 @@ const styles = StyleSheet.create({
   stepBtn: { fontSize: 24, fontWeight: 'bold', color: '#005b9f', paddingHorizontal: 15 },
   stepVal: { fontSize: 18, fontWeight: 'bold' },
   cardInput: { fontSize: 24, fontWeight: 'bold', textAlign: 'right' },
-  obsInput: { backgroundColor: '#FFF', padding: 15, borderRadius: 12, height: 80, marginVertical: 10, elevation: 2, textAlignVertical: 'top' },
+  obsInput: { backgroundColor: '#FFF', padding: 15, borderRadius: 12, height: 60, marginVertical: 10, elevation: 2, textAlignVertical: 'top' },
+  photoContainer: { backgroundColor: '#FFF', padding: 15, borderRadius: 16, marginVertical: 10, elevation: 2 },
+  photoLabel: { fontSize: 14, fontWeight: 'bold', color: '#4B5563', marginBottom: 10 },
+  photoFrame: { height: 220, backgroundColor: '#F3F4F6', borderRadius: 12, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  image: { width: '100%', height: '100%', resizeMode: 'cover' },
+  noPhoto: { color: '#9CA3AF' },
   finalCard: { backgroundColor: '#FFF', padding: 20, borderRadius: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderLeftWidth: 6, borderLeftColor: '#005b9f', marginTop: 10, elevation: 4 },
   finalLabel: { fontSize: 16, fontWeight: 'bold', color: '#005b9f' },
   finalValue: { fontSize: 32, fontWeight: 'bold' },
