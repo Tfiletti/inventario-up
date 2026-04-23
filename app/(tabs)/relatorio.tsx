@@ -1,183 +1,185 @@
-import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View, FlatList, ActivityIndicator, TouchableOpacity, StatusBar, ScrollView, Alert, RefreshControl, TextInput } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import React, { useEffect, useState } from 'react';
+import { StyleSheet, Text, View, FlatList, TouchableOpacity, ActivityIndicator, Alert, ScrollView } from 'react-native';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { supabase } from '../../src/supabase';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 
-// Tipagem para clareza no desenvolvimento
-interface RelatorioData {
-  codigo: string;
-  descricao: string;
-  fisico: number;
-  sap: number;
-  desvio: number;
-}
+// DEFINIÇÃO DE LARGURA DAS COLUNAS (PARA SIMETRIA TOTAL)
+const COL_ITEM = 4;    // Código e Descrição
+const COL_FISICO = 2;  // Valor Físico
+const COL_SAP = 2;     // Valor SAP
+const COL_DESVIO = 2.5; // Desvio + Ícone
 
-export default function TelaRelatorio() {
-  const [dados, setDados] = useState<RelatorioData[]>([]);
-  const [carregando, setCarregando] = useState(true);
-  
-  // FILTROS
-  const [dataBusca, setDataBusca] = useState(new Date().toISOString().split('T')[0]); 
+export default function TelaDivergencia() {
+  const [dataSelecionada, setDataSelecionada] = useState(new Date());
   const [supervisorAtivo, setSupervisorAtivo] = useState('Edevandro');
-  
+  const [lista, setLista] = useState<any[]>([]);
+  const [carregando, setCarregando] = useState(true);
+
   const supervisores = ['Edevandro', 'Everaldo', 'Fabio', 'Joel', 'Marcelo', 'Samuel'];
 
-  // FUNÇÃO PRINCIPAL DE BUSCA E CÁLCULO
-  async function gerarRelatorio() {
+  // 1. LÓGICA DE TURNO 05H ÀS 05H
+  const obterFiltroTurno = (dataBase: Date) => {
+    const inicio = new Date(dataBase);
+    inicio.setHours(5, 0, 0, 0);
+    const fim = new Date(inicio);
+    fim.setDate(inicio.getDate() + 1);
+    fim.setHours(5, 0, 0, 0);
+    return { inicio: inicio.toISOString(), fim: fim.toISOString() };
+  };
+
+  // 2. BUSCA DE DADOS COM CRUZAMENTO (FISICO vs SAP)
+  const buscarDados = async () => {
     setCarregando(true);
+    const { inicio, fim } = obterFiltroTurno(dataSelecionada);
+
     try {
-      // 1. Busca os itens do supervisor (Base da Tabela)
-      const { data: itensDB, error: errItens } = await supabase
+      // Busca todos os itens do supervisor selecionado
+      const { data: itens, error: errItens } = await supabase
         .from('itens')
-        .select('codigo_sap, descricao')
+        .select('id, descricao, saldo_sap')
         .eq('supervisor', supervisorAtivo);
 
       if (errItens) throw errItens;
-      if (!itensDB || itensDB.length === 0) {
-        setDados([]);
-        setCarregando(false);
-        return;
-      }
 
-      const codigosSetor = itensDB.map(i => i.codigo_sap);
+      // Busca as contagens do turno
+      const { data: contagens, error: errCont } = await supabase
+        .from('contagens')
+        .select('item_id, peso_liquido_calculado')
+        .gte('data_hora', inicio)
+        .lt('data_hora', fim);
 
-      // 2. Ajuste de Fuso Horário (UTC-3)
-      const dataLocalInicio = new Date(dataBusca + "T00:00:00");
-      const dataLocalFim = new Date(dataBusca + "T23:59:59");
-      const inicioUTC = dataLocalInicio.toISOString();
-      const fimUTC = dataLocalFim.toISOString();
+      if (errCont) throw errCont;
 
-      // 3. Busca Contagens e Saldos SAP
-      const [resContagens, resSap] = await Promise.all([
-        supabase.from('contagens').select('peso_liquido_calculado, item_id').in('item_id', codigosSetor).gte('data_hora', inicioUTC).lte('data_hora', fimUTC),
-        supabase.from('estoque_sap').select('codigo_sap, saldo_sap').in('codigo_sap', codigosSetor)
-      ]);
+      // Consolida os dados
+      const listaConsolidada = itens.map(item => {
+        const totalFisico = contagens
+          ?.filter(c => c.item_id === item.id)
+          .reduce((acc, curr) => acc + (curr.peso_liquido_calculado || 0), 0);
 
-      if (resContagens.error) throw resContagens.error;
-
-      // 4. Cruzamento de Dados (Lógica de Planilha)
-      const relatorioFinal = itensDB.map(item => {
-        const totalFisico = (resContagens.data || [])
-          .filter(c => String(c.item_id).trim() === String(item.codigo_sap).trim())
-          .reduce((acc, curr) => acc + curr.peso_liquido_calculado, 0);
-        
-        const saldoSAP = resSap.data?.find(s => s.codigo_sap === item.codigo_sap)?.saldo_sap || 0;
+        const sap = item.saldo_sap || 0;
+        const desvio = (totalFisico || 0) - sap;
 
         return {
-          codigo: item.codigo_sap,
+          id: item.id,
           descricao: item.descricao,
-          fisico: totalFisico,
-          sap: saldoSAP,
-          desvio: totalFisico - saldoSAP
+          fisico: totalFisico || 0,
+          sap: sap,
+          desvio: desvio
         };
       });
 
-      setDados(relatorioFinal);
-    } catch (error: any) {
-      console.error(error.message);
+      setLista(listaConsolidada);
+    } catch (err: any) {
+      Alert.alert("Erro", err.message);
     } finally {
       setCarregando(false);
     }
-  }
+  };
 
-  // EFEITO PARA REALTIME E FILTROS
-  useEffect(() => {
-    gerarRelatorio();
+  useEffect(() => { buscarDados(); }, [supervisorAtivo, dataSelecionada]);
 
-    // ESCUTA EM TEMPO REAL: Se algo mudar na tabela 'contagens', recalcula o relatório
-    const canalRealtime = supabase
-      .channel('db-sync-relatorio')
-      .on(
-        'postgres_changes', 
-        { event: '*', schema: 'public', table: 'contagens' }, 
-        () => {
-          console.log('Dados alterados! Sincronizando relatório...');
-          gerarRelatorio();
-        }
-      )
-      .subscribe();
+  // 3. EXPORTAÇÃO CSV SIMÉTRICA
+  const exportarCSV = async () => {
+    if (lista.length === 0) return;
+    
+    let csv = "ITEM;DESCRICAO;FISICO;SAP;DESVIO\n";
+    lista.forEach(i => {
+      csv += `${i.id};${i.descricao?.replace(/;/g, ",")};${i.fisico.toFixed(2).replace(".", ",")};${i.sap.toFixed(2).replace(".", ",")};${i.desvio.toFixed(2).replace(".", ",")}\n`;
+    });
 
-    return () => {
-      supabase.removeChannel(canalRealtime);
-    };
-  }, [supervisorAtivo, dataBusca]);
-
-  const renderIcon = (desvio: number) => {
-    if (Math.abs(desvio) < 0.01) return <Ionicons name="checkmark-circle" size={16} color="#10B981" />;
-    return <Ionicons name={desvio > 0 ? "alert-circle" : "close-circle"} size={16} color={desvio > 0 ? "#F59E0B" : "#EF4444"} />;
+    const uri = FileSystem.documentDirectory + `Divergencia_${supervisorAtivo}.csv`;
+    await FileSystem.writeAsStringAsync(uri, csv, { encoding: FileSystem.EncodingType.UTF8 });
+    await Sharing.shareAsync(uri);
   };
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
-      
-      <View style={styles.header}>
-        <Text style={styles.title}>Divergência de Inventário</Text>
-        <View style={styles.dateSelector}>
-          <Ionicons name="calendar-outline" size={18} color="#BFDBFE" />
-          <TextInput 
-            style={styles.dateInput}
-            value={dataBusca}
-            onChangeText={setDataBusca}
-            placeholder="AAAA-MM-DD"
-            placeholderTextColor="#60A5FA"
-          />
-          <TouchableOpacity onPress={gerarRelatorio}>
-            <Ionicons name="refresh-circle" size={32} color="#FFF" />
-          </TouchableOpacity>
+      {/* HEADER AZUL PADRÃO YPÊ */}
+      <View style={styles.headerAzul}>
+        <Text style={styles.titlePrincipal}>Divergência de Inventário</Text>
+        
+        <View style={styles.barraFiltro}>
+          <View style={styles.dataContainer}>
+            <Ionicons name="calendar-outline" size={20} color="#FFF" />
+            <Text style={styles.txtData}>{dataSelecionada.toLocaleDateString('pt-BR')}</Text>
+          </View>
+          
+          <View style={styles.acoesHeader}>
+            <TouchableOpacity onPress={exportarCSV} style={styles.iconBtn}>
+              <MaterialCommunityIcons name="file-excel" size={24} color="#FFF" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={buscarDados} style={styles.iconBtn}>
+              <Ionicons name="refresh-circle" size={26} color="#FFF" />
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
-      <View style={styles.filterBar}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+      {/* FILTRO DE SUPERVISORES (BADGES) */}
+      <View style={styles.containerSupervisores}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 15 }}>
           {supervisores.map(sup => (
             <TouchableOpacity 
               key={sup} 
               onPress={() => setSupervisorAtivo(sup)}
-              style={[styles.chip, supervisorAtivo === sup && styles.chipAtivo]}
+              style={[styles.badge, supervisorAtivo === sup && styles.badgeAtivo]}
             >
-              <Text style={[styles.chipText, supervisorAtivo === sup && styles.chipTextAtivo]}>{sup}</Text>
+              <Text style={[styles.txtBadge, supervisorAtivo === sup && styles.txtBadgeAtivo]}>{sup}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
       </View>
 
+      {/* CABEÇALHO DA TABELA (SIMETRIA) */}
       <View style={styles.tableHeader}>
-        <Text style={[styles.colH, { flex: 2.5, textAlign: 'left' }]}>Item</Text>
-        <Text style={styles.colH}>Físico</Text>
-        <Text style={styles.colH}>SAP</Text>
-        <Text style={styles.colH}>Desvio</Text>
+        <Text style={[styles.txtHead, { flex: COL_ITEM, textAlign: 'left' }]}>Item</Text>
+        <Text style={[styles.txtHead, { flex: COL_FISICO }]}>Físico</Text>
+        <Text style={[styles.txtHead, { flex: COL_SAP }]}>SAP</Text>
+        <Text style={[styles.txtHead, { flex: COL_DESVIO, textAlign: 'right' }]}>Desvio</Text>
       </View>
 
       {carregando ? (
         <ActivityIndicator size="large" color="#005b9f" style={{ marginTop: 50 }} />
       ) : (
         <FlatList
-          data={dados}
-          keyExtractor={(item) => item.codigo}
-          refreshControl={<RefreshControl refreshing={false} onRefresh={gerarRelatorio} />}
+          data={lista}
+          keyExtractor={item => item.id}
           renderItem={({ item }) => (
             <View style={styles.row}>
-              <View style={{ flex: 2.5 }}>
-                <Text style={styles.txtCodigo}>{item.codigo}</Text>
-                <Text style={styles.txtDesc} numberOfLines={1}>{item.descricao}</Text>
+              {/* COLUNA ITEM */}
+              <View style={{ flex: COL_ITEM }}>
+                <Text style={styles.itemCode}>{item.id}</Text>
+                <Text style={styles.itemDesc} numberOfLines={1}>{item.descricao}</Text>
               </View>
-              <Text style={styles.txtVal}>{item.fisico.toFixed(2)}</Text>
-              <Text style={styles.txtVal}>{item.sap.toFixed(2)}</Text>
-              <View style={[styles.txtVal, styles.desvioCell]}>
-                {renderIcon(item.desvio)}
-                <Text style={[styles.txtDesvio, { color: item.desvio < 0 ? "#EF4444" : "#1F2937" }]}>
+
+              {/* COLUNA FÍSICO */}
+              <View style={{ flex: COL_FISICO, alignItems: 'center' }}>
+                <Text style={styles.valFisico}>{item.fisico.toFixed(2)}</Text>
+              </View>
+
+              {/* COLUNA SAP */}
+              <View style={{ flex: COL_SAP, alignItems: 'center' }}>
+                <Text style={styles.valSap}>{item.sap.toFixed(2)}</Text>
+              </View>
+
+              {/* COLUNA DESVIO COM ALERTA */}
+              <View style={{ flex: COL_DESVIO, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center' }}>
+                {item.desvio !== 0 && (
+                  <Ionicons 
+                    name="alert-circle" 
+                    size={16} 
+                    color={item.desvio < 0 ? "#EF4444" : "#F59E0B"} 
+                    style={{ marginRight: 4 }} 
+                  />
+                )}
+                <Text style={[styles.valDesvio, { color: item.desvio < 0 ? '#EF4444' : item.desvio > 0 ? '#F59E0B' : '#10B981' }]}>
                   {item.desvio.toFixed(2)}
                 </Text>
               </View>
             </View>
           )}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Ionicons name="clipboard-outline" size={40} color="#D1D5DB" />
-              <Text style={styles.emptyText}>Nenhum item para {supervisorAtivo}.</Text>
-            </View>
-          }
         />
       )}
     </View>
@@ -186,23 +188,48 @@ export default function TelaRelatorio() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFF' },
-  header: { backgroundColor: '#005b9f', paddingTop: 60, paddingBottom: 15, paddingHorizontal: 20 },
-  title: { color: '#FFF', fontSize: 20, fontWeight: 'bold' },
-  dateSelector: { flexDirection: 'row', alignItems: 'center', marginTop: 10, backgroundColor: '#004a80', borderRadius: 8, paddingHorizontal: 10 },
-  dateInput: { flex: 1, color: '#FFF', paddingVertical: 8, marginLeft: 8, fontSize: 16, fontWeight: 'bold' },
-  filterBar: { padding: 10, backgroundColor: '#F3F4F6', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
-  chip: { paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, backgroundColor: '#E5E7EB', marginRight: 10 },
-  chipAtivo: { backgroundColor: '#005b9f' },
-  chipText: { fontSize: 13, color: '#4B5563', fontWeight: 'bold' },
-  chipTextAtivo: { color: '#FFF' },
-  tableHeader: { flexDirection: 'row', backgroundColor: '#E5E7EB', padding: 12 },
-  colH: { flex: 1, fontSize: 10, fontWeight: 'bold', color: '#4B5563', textAlign: 'center' },
-  row: { flexDirection: 'row', padding: 15, borderBottomWidth: 1, borderBottomColor: '#F3F4F6', alignItems: 'center' },
-  txtCodigo: { fontSize: 14, fontWeight: 'bold', color: '#005b9f' },
-  txtDesc: { fontSize: 11, color: '#9CA3AF' },
-  txtVal: { flex: 1, textAlign: 'center', fontSize: 12, fontWeight: '700' },
-  desvioCell: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
-  txtDesvio: { fontSize: 12, fontWeight: 'bold' },
-  empty: { marginTop: 80, alignItems: 'center' },
-  emptyText: { marginTop: 10, color: '#9CA3AF', fontSize: 14 }
+  headerAzul: { backgroundColor: '#005b9f', paddingTop: 60, paddingBottom: 25, paddingHorizontal: 20 },
+  titlePrincipal: { fontSize: 24, fontWeight: 'bold', color: '#FFF', marginBottom: 15 },
+  barraFiltro: { 
+    backgroundColor: 'rgba(255,255,255,0.15)', 
+    borderRadius: 12, 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'space-between',
+    padding: 12 
+  },
+  dataContainer: { flexDirection: 'row', alignItems: 'center' },
+  txtData: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginLeft: 10 },
+  acoesHeader: { flexDirection: 'row', gap: 15 },
+  iconBtn: { padding: 2 },
+  
+  containerSupervisores: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  badge: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 12, backgroundColor: '#F1F5F9', marginRight: 8 },
+  badgeAtivo: { backgroundColor: '#005b9f' },
+  txtBadge: { fontSize: 14, fontWeight: 'bold', color: '#64748B' },
+  txtBadgeAtivo: { color: '#FFF' },
+
+  tableHeader: { 
+    flexDirection: 'row', 
+    paddingHorizontal: 20, 
+    paddingVertical: 12, 
+    backgroundColor: '#F8FAFC',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0'
+  },
+  txtHead: { fontSize: 11, fontWeight: '900', color: '#94A3B8', textTransform: 'uppercase' },
+
+  row: { 
+    flexDirection: 'row', 
+    paddingHorizontal: 20, 
+    paddingVertical: 18, 
+    borderBottomWidth: 1, 
+    borderBottomColor: '#F1F5F9',
+    alignItems: 'center' 
+  },
+  itemCode: { fontSize: 15, fontWeight: 'bold', color: '#005b9f' },
+  itemDesc: { fontSize: 10, color: '#94A3B8', textTransform: 'uppercase', marginTop: 2 },
+  valFisico: { fontSize: 14, fontWeight: 'bold', color: '#1E293B' },
+  valSap: { fontSize: 14, fontWeight: '600', color: '#64748B' },
+  valDesvio: { fontSize: 14, fontWeight: 'bold', textAlign: 'right' }
 });
