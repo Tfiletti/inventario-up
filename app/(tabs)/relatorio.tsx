@@ -1,18 +1,21 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { StyleSheet, Text, View, FlatList, TouchableOpacity, ActivityIndicator, Alert, ScrollView } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { supabase } from '../../src/supabase';
+import { supabase } from '../../src/supabase'; // Ajuste o caminho se necessário
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { useFocusEffect } from 'expo-router';
 
 // DEFINIÇÃO DE LARGURA DAS COLUNAS (PARA SIMETRIA TOTAL)
 const COL_ITEM = 4;    // Código e Descrição
 const COL_FISICO = 2;  // Valor Físico
 const COL_SAP = 2;     // Valor SAP
-const COL_DESVIO = 2.5; // Desvio + Ícone
+const COL_DESVIO = 2.5; // Desvio + Ícone + Grana
 
 export default function TelaDivergencia() {
   const [dataSelecionada, setDataSelecionada] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [supervisorAtivo, setSupervisorAtivo] = useState('Edevandro');
   const [lista, setLista] = useState<any[]>([]);
   const [carregando, setCarregando] = useState(true);
@@ -29,21 +32,33 @@ export default function TelaDivergencia() {
     return { inicio: inicio.toISOString(), fim: fim.toISOString() };
   };
 
-  // 2. BUSCA DE DADOS COM CRUZAMENTO (FISICO vs SAP)
+  // 2. BUSCA DE DADOS COM CRUZAMENTO (FISICO vs SAP HISTÓRICO + GRANA)
   const buscarDados = async () => {
     setCarregando(true);
     const { inicio, fim } = obterFiltroTurno(dataSelecionada);
+    
+    // -------------------------------------------------------------
+    // CORREÇÃO DO FUSO HORÁRIO: Pega a data exata local (YYYY-MM-DD)
+    // -------------------------------------------------------------
+    const ano = dataSelecionada.getFullYear();
+    const mes = String(dataSelecionada.getMonth() + 1).padStart(2, '0');
+    const dia = String(dataSelecionada.getDate()).padStart(2, '0');
+    const dataLocalStr = `${ano}-${mes}-${dia}`;
+    
+    // Cria uma "janela" que engloba o dia todo no Supabase
+    const sapInicio = `${dataLocalStr}T00:00:00.000Z`;
+    const sapFim = `${dataLocalStr}T23:59:59.999Z`;
 
     try {
-      // Busca todos os itens do supervisor selecionado
+      // 1. Busca os dados mestres do item (Descricao, Preço, Supervisor)
       const { data: itens, error: errItens } = await supabase
         .from('itens')
-        .select('id, descricao, saldo_sap')
+        .select('id, descricao, preco_unitario')
         .eq('supervisor', supervisorAtivo);
 
       if (errItens) throw errItens;
 
-      // Busca as contagens do turno
+      // 2. Busca as contagens FÍSICAS do turno selecionado
       const { data: contagens, error: errCont } = await supabase
         .from('contagens')
         .select('item_id, peso_liquido_calculado')
@@ -52,21 +67,38 @@ export default function TelaDivergencia() {
 
       if (errCont) throw errCont;
 
-      // Consolida os dados
+      // 3. Busca o saldo SAP ESPECÍFICO (usando a janela do dia)
+      const { data: estoqueSap, error: errSap } = await supabase
+        .from('estoque_sap')
+        .select('codigo_sap, saldo_sap')
+        .gte('data_atualizacao', sapInicio)
+        .lte('data_atualizacao', sapFim);
+
+      if (errSap) throw errSap;
+
+      // Consolida tudo e calcula a grana
       const listaConsolidada = itens.map(item => {
+        // Soma o físico
         const totalFisico = contagens
           ?.filter(c => c.item_id === item.id)
           .reduce((acc, curr) => acc + (curr.peso_liquido_calculado || 0), 0);
 
-        const sap = item.saldo_sap || 0;
+        // Pega o SAP exato daquele dia (forçando string para evitar bugs de tipagem)
+        const itemSap = estoqueSap?.find(e => String(e.codigo_sap) === String(item.id));
+        const sap = itemSap ? (itemSap.saldo_sap || 0) : 0; 
+
+        // Cálculos
         const desvio = (totalFisico || 0) - sap;
+        const precoUnit = item.preco_unitario || 0;
+        const impacto = desvio * precoUnit;
 
         return {
           id: item.id,
           descricao: item.descricao,
           fisico: totalFisico || 0,
           sap: sap,
-          desvio: desvio
+          desvio: desvio,
+          impacto: impacto
         };
       });
 
@@ -78,15 +110,28 @@ export default function TelaDivergencia() {
     }
   };
 
-  useEffect(() => { buscarDados(); }, [supervisorAtivo, dataSelecionada]);
+  // 🔄 O "DESPERTADOR" DA ABA
+  useFocusEffect(
+    useCallback(() => {
+      buscarDados();
+    }, [supervisorAtivo, dataSelecionada])
+  );
 
-  // 3. EXPORTAÇÃO CSV SIMÉTRICA
+  // Função disparada quando escolhe a data no calendário
+  const onChangeDate = (event: any, selectedDate?: Date) => {
+    setShowDatePicker(false);
+    if (selectedDate) {
+      setDataSelecionada(selectedDate);
+    }
+  };
+
+  // 3. EXPORTAÇÃO CSV
   const exportarCSV = async () => {
     if (lista.length === 0) return;
     
-    let csv = "ITEM;DESCRICAO;FISICO;SAP;DESVIO\n";
+    let csv = "ITEM;DESCRICAO;FISICO;SAP;DESVIO;IMPACTO (R$)\n";
     lista.forEach(i => {
-      csv += `${i.id};${i.descricao?.replace(/;/g, ",")};${i.fisico.toFixed(2).replace(".", ",")};${i.sap.toFixed(2).replace(".", ",")};${i.desvio.toFixed(2).replace(".", ",")}\n`;
+      csv += `${i.id};${i.descricao?.replace(/;/g, ",")};${i.fisico.toFixed(2).replace(".", ",")};${i.sap.toFixed(2).replace(".", ",")};${i.desvio.toFixed(2).replace(".", ",")};${i.impacto.toFixed(2).replace(".", ",")}\n`;
     });
 
     const uri = FileSystem.documentDirectory + `Divergencia_${supervisorAtivo}.csv`;
@@ -101,10 +146,10 @@ export default function TelaDivergencia() {
         <Text style={styles.titlePrincipal}>Divergência de Inventário</Text>
         
         <View style={styles.barraFiltro}>
-          <View style={styles.dataContainer}>
+          <TouchableOpacity style={styles.dataContainer} onPress={() => setShowDatePicker(true)}>
             <Ionicons name="calendar-outline" size={20} color="#FFF" />
             <Text style={styles.txtData}>{dataSelecionada.toLocaleDateString('pt-BR')}</Text>
-          </View>
+          </TouchableOpacity>
           
           <View style={styles.acoesHeader}>
             <TouchableOpacity onPress={exportarCSV} style={styles.iconBtn}>
@@ -117,7 +162,17 @@ export default function TelaDivergencia() {
         </View>
       </View>
 
-      {/* FILTRO DE SUPERVISORES (BADGES) */}
+      {/* COMPONENTE DO CALENDÁRIO OCULTO */}
+      {showDatePicker && (
+        <DateTimePicker
+          value={dataSelecionada}
+          mode="date"
+          display="default"
+          onChange={onChangeDate}
+        />
+      )}
+
+      {/* FILTRO DE SUPERVISORES */}
       <View style={styles.containerSupervisores}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 15 }}>
           {supervisores.map(sup => (
@@ -132,11 +187,11 @@ export default function TelaDivergencia() {
         </ScrollView>
       </View>
 
-      {/* CABEÇALHO DA TABELA (SIMETRIA) */}
+      {/* CABEÇALHO DA TABELA */}
       <View style={styles.tableHeader}>
         <Text style={[styles.txtHead, { flex: COL_ITEM, textAlign: 'left' }]}>Item</Text>
-        <Text style={[styles.txtHead, { flex: COL_FISICO }]}>Físico</Text>
-        <Text style={[styles.txtHead, { flex: COL_SAP }]}>SAP</Text>
+        <Text style={[styles.txtHead, { flex: COL_FISICO, textAlign: 'center' }]}>Físico</Text>
+        <Text style={[styles.txtHead, { flex: COL_SAP, textAlign: 'center' }]}>SAP</Text>
         <Text style={[styles.txtHead, { flex: COL_DESVIO, textAlign: 'right' }]}>Desvio</Text>
       </View>
 
@@ -164,22 +219,30 @@ export default function TelaDivergencia() {
                 <Text style={styles.valSap}>{item.sap.toFixed(2)}</Text>
               </View>
 
-              {/* COLUNA DESVIO COM ALERTA */}
-              <View style={{ flex: COL_DESVIO, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center' }}>
-                {item.desvio !== 0 && (
-                  <Ionicons 
-                    name="alert-circle" 
-                    size={16} 
-                    color={item.desvio < 0 ? "#EF4444" : "#F59E0B"} 
-                    style={{ marginRight: 4 }} 
-                  />
-                )}
-                <Text style={[styles.valDesvio, { color: item.desvio < 0 ? '#EF4444' : item.desvio > 0 ? '#F59E0B' : '#10B981' }]}>
-                  {item.desvio.toFixed(2)}
+              {/* COLUNA DESVIO COM ALERTA E GRANA */}
+              <View style={{ flex: COL_DESVIO, alignItems: 'flex-end' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  {item.desvio !== 0 && (
+                    <Ionicons 
+                      name="alert-circle" 
+                      size={14} 
+                      color={item.desvio < 0 ? "#EF4444" : "#F59E0B"} 
+                      style={{ marginRight: 4 }} 
+                    />
+                  )}
+                  <Text style={[styles.valDesvio, { color: item.desvio < 0 ? '#EF4444' : item.desvio > 0 ? '#F59E0B' : '#10B981' }]}>
+                    {item.desvio > 0 ? `+${item.desvio.toFixed(2)}` : item.desvio.toFixed(2)}
+                  </Text>
+                </View>
+                
+                {/* RENDERIZAÇÃO DA GRANA */}
+                <Text style={[styles.valGrana, { color: item.impacto < 0 ? '#EF4444' : '#64748B' }]}>
+                  {item.impacto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                 </Text>
               </View>
             </View>
           )}
+          ListEmptyComponent={<Text style={styles.emptyText}>Sem dados para este filtro.</Text>}
         />
       )}
     </View>
@@ -198,7 +261,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 12 
   },
-  dataContainer: { flexDirection: 'row', alignItems: 'center' },
+  dataContainer: { flexDirection: 'row', alignItems: 'center', padding: 4 },
   txtData: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginLeft: 10 },
   acoesHeader: { flexDirection: 'row', gap: 15 },
   iconBtn: { padding: 2 },
@@ -222,7 +285,7 @@ const styles = StyleSheet.create({
   row: { 
     flexDirection: 'row', 
     paddingHorizontal: 20, 
-    paddingVertical: 18, 
+    paddingVertical: 16, 
     borderBottomWidth: 1, 
     borderBottomColor: '#F1F5F9',
     alignItems: 'center' 
@@ -231,5 +294,8 @@ const styles = StyleSheet.create({
   itemDesc: { fontSize: 10, color: '#94A3B8', textTransform: 'uppercase', marginTop: 2 },
   valFisico: { fontSize: 14, fontWeight: 'bold', color: '#1E293B' },
   valSap: { fontSize: 14, fontWeight: '600', color: '#64748B' },
-  valDesvio: { fontSize: 14, fontWeight: 'bold', textAlign: 'right' }
+  valDesvio: { fontSize: 14, fontWeight: 'bold' },
+  valGrana: { fontSize: 10, fontWeight: 'bold', marginTop: 2 }, 
+  
+  emptyText: { textAlign: 'center', marginTop: 40, color: '#94A3B8' }
 });
