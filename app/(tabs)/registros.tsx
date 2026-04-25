@@ -1,28 +1,37 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { StyleSheet, Text, View, FlatList, ActivityIndicator, TouchableOpacity, RefreshControl, StatusBar } from 'react-native';
-import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons'; // Importando ícones
+import { useRouter, useFocusEffect } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons'; 
 import { supabase } from '../../src/supabase';
+// 1. Importação essencial para ajuste de área segura
+import { useSafeAreaInsets } from 'react-native-safe-area-context'; 
 
 export default function TelaRegistros() {
   const [registros, setRegistros] = useState<any[]>([]);
   const [carregando, setCarregando] = useState(true);
   const router = useRouter();
+  const insets = useSafeAreaInsets(); // 2. Hook de GPS do sistema
 
-  // Lógica do Ciclo Ypê (05h às 05h)
+  // --- FUNÇÃO DE FORMATAÇÃO (PADRÃO SMARTCOUNT) ---
+  const formatarPeso = (valor: number) => {
+    if (valor === undefined || valor === null) return "0,00";
+    return valor
+      .toFixed(2)
+      .replace('.', ',')
+      .replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1.');
+  };
+
   const obterFiltroTurno = () => {
     const agora = new Date();
     const inicio = new Date(agora);
     if (agora.getHours() < 5) inicio.setDate(agora.getDate() - 1);
     inicio.setHours(5, 0, 0, 0);
-
     const fim = new Date(inicio);
     fim.setDate(inicio.getDate() + 1);
-    
     return { 
       inicio: inicio.toISOString(), 
       fim: fim.toISOString(),
-      exibicao: inicio.toLocaleDateString() 
+      exibicao: inicio.toLocaleDateString('pt-BR') 
     };
   };
 
@@ -47,32 +56,42 @@ export default function TelaRegistros() {
     }
   }
 
-  useEffect(() => {
-    buscarRegistros();
-    const canal = supabase.channel('registros-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'contagens' }, () => buscarRegistros())
-      .subscribe();
-    return () => { supabase.removeChannel(canal); };
-  }, []);
+  // 3. Atualiza sempre que o supervisor abrir a aba (mais confiável)
+  useFocusEffect(
+    useCallback(() => {
+      buscarRegistros();
+    }, [])
+  );
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" />
-      <View style={styles.header}>
-        <Text style={styles.txtCiclo}>🕒 Ciclo: 05h às 05h ({obterFiltroTurno().exibicao})</Text>
+      
+      {/* HEADER DINÂMICO */}
+      <View style={[styles.header, { paddingTop: insets.top + 15 }]}>
+        <View style={styles.headerContent}>
+            <Ionicons name="time-outline" size={16} color="#0369A1" />
+            <Text style={styles.txtCiclo}> Ciclo: 05h às 05h ({obterFiltroTurno().exibicao})</Text>
+        </View>
       </View>
 
       <FlatList 
         data={registros}
         keyExtractor={(item) => item.id.toString()}
         refreshControl={<RefreshControl refreshing={carregando} onRefresh={buscarRegistros} color="#005b9f" />}
+        // 4. O ajuste mestre para não ficar atrás da Tab Bar
+        contentContainerStyle={{ 
+            paddingBottom: insets.bottom + 120,
+            paddingTop: 10
+        }}
         renderItem={({ item }) => (
           <TouchableOpacity 
             style={styles.card} 
             onPress={() => router.push({ pathname: '/editar-contagem', params: { id: item.id } })}
+            activeOpacity={0.7}
           >
             <View style={styles.cardHeader}>
-              <View>
+              <View style={{ flex: 1 }}>
                 <Text style={styles.txtArea}>📍 {item.areas?.nome || 'Sem Área'}</Text>
                 <Text style={styles.txtSap}>{item.itens?.codigo_sap}</Text>
               </View>
@@ -80,47 +99,100 @@ export default function TelaRegistros() {
               <View style={styles.statusIcons}>
                 <Text style={styles.txtHora}>{new Date(item.data_hora).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</Text>
                 
-                {/* INDICADORES VISUAIS */}
                 <View style={styles.iconRow}>
                   {item.foto_url && (
-                    <Ionicons name="camera" size={14} color="#005b9f" style={styles.miniIcon} />
+                    <View style={styles.badgeIcon}>
+                        <Ionicons name="camera" size={12} color="#005b9f" />
+                    </View>
                   )}
-                  {item.observacao && item.observacao !== 'EMPTY' && (
-                    <Ionicons name="document-text" size={14} color="#6B7280" style={styles.miniIcon} />
+                  {item.observacao && item.observacao !== '' && item.observacao !== 'EMPTY' && (
+                    <View style={[styles.badgeIcon, { backgroundColor: '#F1F5F9' }]}>
+                        <Ionicons name="document-text" size={12} color="#64748B" />
+                    </View>
                   )}
                 </View>
               </View>
             </View>
 
             <View style={styles.cardBody}>
-              <Text style={styles.txtDesc}>{item.itens?.descricao}</Text>
-              <Text style={styles.txtPeso}>
-                {item.peso_liquido_calculado?.toFixed(2) || '0.00'} 
-                <Text style={styles.unitText}> {item.itens?.tipo_calculo === 'unidade' ? 'un' : 'kg'}</Text>
-              </Text>
+              <Text style={styles.txtDesc} numberOfLines={2}>{item.itens?.descricao}</Text>
+              <View style={styles.pesoContainer}>
+                <Text style={styles.txtPeso}>{formatarPeso(item.peso_liquido_calculado)}</Text>
+                <Text style={styles.unitText}>{item.itens?.tipo_calculo === 'unidade' ? 'un' : 'kg'}</Text>
+              </View>
             </View>
           </TouchableOpacity>
         )}
-        contentContainerStyle={{ paddingBottom: 100 }}
+        ListEmptyComponent={
+            !carregando ? (
+                <View style={styles.emptyContainer}>
+                    <Ionicons name="search-outline" size={50} color="#CBD5E1" />
+                    <Text style={styles.emptyText}>Nenhuma contagem neste turno.</Text>
+                </View>
+            ) : null
+        }
       />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F3F4F6' },
-  header: { backgroundColor: '#FFF', padding: 15, paddingTop: 60, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
-  txtCiclo: { fontSize: 11, fontWeight: 'bold', color: '#0369A1', textAlign: 'center' },
-  card: { backgroundColor: '#FFF', marginHorizontal: 12, marginTop: 12, padding: 15, borderRadius: 12, elevation: 2, borderLeftWidth: 5, borderLeftColor: '#005b9f' },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 5 },
+  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  header: { 
+    backgroundColor: '#FFF', 
+    paddingBottom: 15, 
+    paddingHorizontal: 20, 
+    elevation: 2, 
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+  },
+  headerContent: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'center',
+    backgroundColor: '#E0F2FE',
+    paddingVertical: 6,
+    borderRadius: 20,
+    alignSelf: 'center',
+    paddingHorizontal: 15
+  },
+  txtCiclo: { fontSize: 11, fontWeight: 'bold', color: '#0369A1' },
+  
+  card: { 
+    backgroundColor: '#FFF', 
+    marginHorizontal: 16, 
+    marginBottom: 12, 
+    padding: 16, 
+    borderRadius: 16, 
+    elevation: 3, 
+    borderLeftWidth: 6, 
+    borderLeftColor: '#005b9f',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
   statusIcons: { alignItems: 'flex-end' },
-  iconRow: { flexDirection: 'row', marginTop: 4 },
-  miniIcon: { marginLeft: 5 },
-  txtArea: { fontSize: 10, fontWeight: 'bold', color: '#9CA3AF', marginBottom: 2 },
-  txtHora: { fontSize: 10, color: '#9CA3AF' },
+  iconRow: { flexDirection: 'row', marginTop: 6 },
+  badgeIcon: { 
+    backgroundColor: '#E0F2FE', 
+    padding: 4, 
+    borderRadius: 6, 
+    marginLeft: 6 
+  },
+  txtArea: { fontSize: 11, fontWeight: 'bold', color: '#94A3B8', textTransform: 'uppercase', marginBottom: 2 },
+  txtHora: { fontSize: 10, color: '#94A3B8', fontWeight: 'bold' },
   txtSap: { fontSize: 18, fontWeight: 'bold', color: '#1E293B' },
-  cardBody: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 5 },
-  txtDesc: { fontSize: 12, color: '#64748B', flex: 1, marginRight: 10 },
+  
+  cardBody: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 4 },
+  txtDesc: { fontSize: 13, color: '#64748B', flex: 1, marginRight: 15, lineHeight: 18 },
+  pesoContainer: { alignItems: 'flex-end' },
   txtPeso: { fontSize: 22, fontWeight: 'bold', color: '#1E293B' },
-  unitText: { fontSize: 12, color: '#64748B' }
+  unitText: { fontSize: 10, color: '#94A3B8', fontWeight: 'bold', textTransform: 'uppercase' },
+  
+  emptyContainer: { alignItems: 'center', marginTop: 100 },
+  emptyText: { marginTop: 10, color: '#94A3B8', fontSize: 14 }
 });

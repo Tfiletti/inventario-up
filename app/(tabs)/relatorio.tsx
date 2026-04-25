@@ -6,6 +6,8 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect } from 'expo-router';
+// 1. Importação essencial para ler o tamanho da barra do Android
+import { useSafeAreaInsets } from 'react-native-safe-area-context'; 
 
 const COL_ITEM = 4;
 const COL_FISICO = 2;
@@ -13,6 +15,7 @@ const COL_SAP = 2;
 const COL_DESVIO = 2.5;
 
 export default function TelaDivergencia() {
+  const insets = useSafeAreaInsets(); // 2. Pegando as medidas do sistema
   const [dataSelecionada, setDataSelecionada] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [supervisorAtivo, setSupervisorAtivo] = useState('Edevandro');
@@ -21,20 +24,14 @@ export default function TelaDivergencia() {
 
   const supervisores = ['Edevandro', 'Everaldo', 'Fabio', 'Joel', 'Marcelo', 'Samuel'];
 
-  // --- NOVA FUNÇÃO DE FORMATAÇÃO (INFALÍVEL) ---
   const formatarPeso = (valor: number) => {
     if (valor === undefined || valor === null) return "0,00";
-    
-    // 1. Garante 2 casas decimais e transforma em string
-    // 2. Troca o ponto decimal por vírgula
-    // 3. Usa uma expressão regular para colocar o ponto de milhar
     return valor
       .toFixed(2)
       .replace('.', ',')
       .replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1.');
   };
 
-  // --- FUNÇÃO PARA MOEDA (TAMBÉM MANUAL PARA GARANTIR) ---
   const formatarMoedaManual = (valor: number) => {
     return "R$ " + formatarPeso(valor);
   };
@@ -129,12 +126,10 @@ export default function TelaDivergencia() {
 
   const exportarCSV = async () => {
     if (lista.length === 0) return;
-    
     let csv = "ITEM;DESCRICAO;FISICO;SAP;DESVIO;IMPACTO (R$)\n";
     lista.forEach(i => {
       csv += `${i.id};${i.descricao?.replace(/;/g, ",")};${formatarPeso(i.fisico)};${formatarPeso(i.sap)};${formatarPeso(i.desvio)};${formatarPeso(i.impacto)}\n`;
     });
-
     const uri = FileSystem.documentDirectory + `Divergencia_${supervisorAtivo}.csv`;
     await FileSystem.writeAsStringAsync(uri, csv, { encoding: FileSystem.EncodingType.UTF8 });
     await Sharing.shareAsync(uri);
@@ -161,12 +156,7 @@ export default function TelaDivergencia() {
       </View>
 
       {showDatePicker && (
-        <DateTimePicker
-          value={dataSelecionada}
-          mode="date"
-          display="default"
-          onChange={onChangeDate}
-        />
+        <DateTimePicker value={dataSelecionada} mode="date" display="default" onChange={onChangeDate} />
       )}
 
       <View style={styles.containerSupervisores}>
@@ -196,6 +186,10 @@ export default function TelaDivergencia() {
         <FlatList
           data={lista}
           keyExtractor={item => item.id}
+          // 3. A MÁGICA ACONTECE AQUI:
+          contentContainerStyle={{ 
+            paddingBottom: insets.bottom + 100 // Garante que a lista termine acima da Tab Bar
+          }}
           renderItem={({ item }) => (
             <View style={styles.row}>
               <View style={{ flex: COL_ITEM }}>
@@ -214,18 +208,12 @@ export default function TelaDivergencia() {
               <View style={{ flex: COL_DESVIO, alignItems: 'flex-end' }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   {item.desvio !== 0 && (
-                    <Ionicons 
-                      name="alert-circle" 
-                      size={14} 
-                      color={item.desvio < 0 ? "#EF4444" : "#F59E0B"} 
-                      style={{ marginRight: 4 }} 
-                    />
+                    <Ionicons name="alert-circle" size={14} color={item.desvio < 0 ? "#EF4444" : "#F59E0B"} style={{ marginRight: 4 }} />
                   )}
                   <Text style={[styles.valDesvio, { color: item.desvio < 0 ? '#EF4444' : item.desvio > 0 ? '#F59E0B' : '#10B981' }]}>
                     {item.desvio > 0 ? `+${formatarPeso(item.desvio)}` : formatarPeso(item.desvio)}
                   </Text>
                 </View>
-                
                 <Text style={[styles.valGrana, { color: item.impacto < 0 ? '#EF4444' : '#64748B' }]}>
                   {formatarMoedaManual(item.impacto)}
                 </Text>
@@ -255,13 +243,11 @@ const styles = StyleSheet.create({
   txtData: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginLeft: 10 },
   acoesHeader: { flexDirection: 'row', gap: 15 },
   iconBtn: { padding: 2 },
-  
   containerSupervisores: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
   badge: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 12, backgroundColor: '#F1F5F9', marginRight: 8 },
   badgeAtivo: { backgroundColor: '#005b9f' },
   txtBadge: { fontSize: 14, fontWeight: 'bold', color: '#64748B' },
   txtBadgeAtivo: { color: '#FFF' },
-
   tableHeader: { 
     flexDirection: 'row', 
     paddingHorizontal: 20, 
@@ -271,7 +257,6 @@ const styles = StyleSheet.create({
     borderBottomColor: '#E2E8F0'
   },
   txtHead: { fontSize: 11, fontWeight: '900', color: '#94A3B8', textTransform: 'uppercase' },
-
   row: { 
     flexDirection: 'row', 
     paddingHorizontal: 20, 
@@ -286,6 +271,5 @@ const styles = StyleSheet.create({
   valSap: { fontSize: 14, fontWeight: '600', color: '#64748B' },
   valDesvio: { fontSize: 14, fontWeight: 'bold' },
   valGrana: { fontSize: 10, fontWeight: 'bold', marginTop: 2 }, 
-  
   emptyText: { textAlign: 'center', marginTop: 40, color: '#94A3B8' }
 });
