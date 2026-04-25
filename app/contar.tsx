@@ -4,8 +4,9 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import InputSpinner from 'react-native-input-spinner';
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { SafeAreaView } from 'react-native-safe-area-context'; // Importação essencial para o rodapé
 
-// MUDANÇA AQUI: Importando do caminho 'legacy' para aceitar o readAsStringAsync
+// Usando o caminho 'legacy' para aceitar o readAsStringAsync
 import * as FileSystem from 'expo-file-system/legacy'; 
 
 import { Buffer } from 'buffer';
@@ -97,7 +98,6 @@ export default function TelaDeContagem() {
       let nomeArquivoFoto = null;
 
       if (fotoUri) {
-        // Lendo o arquivo usando a API de legado que o erro solicitou
         const base64 = await FileSystem.readAsStringAsync(fotoUri, { 
           encoding: 'base64' 
         });
@@ -143,6 +143,7 @@ export default function TelaDeContagem() {
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
       <HeaderContagem />
+      
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.infoBox}>
           {params.areaNome ? (
@@ -158,18 +159,36 @@ export default function TelaDeContagem() {
         </View>
 
         <View style={styles.rowDupla}>
-          <View style={styles.colunaSpinner}><Text style={styles.label}>Nº Tubetes:</Text><InputSpinner max={500} min={0} step={1} skin="clean" value={numTubetes} onChange={setNumTubetes} width={110} color="#005b9f" /></View>
-          <View style={styles.colunaInput}><Text style={styles.labelInput}>Tara Tubete:</Text><TextInput style={styles.inputCompacto} keyboardType="numeric" value={taraTubete} onChangeText={setTaraTubete} selectTextOnFocus /></View>
+          <View style={styles.colunaSpinner}>
+            <Text style={styles.label}>Nº Tubetes:</Text>
+            <InputSpinner max={500} min={0} step={1} skin="clean" value={numTubetes} onChange={setNumTubetes} width={110} color="#005b9f" />
+          </View>
+          <View style={styles.colunaInput}>
+            <Text style={styles.labelInput}>Tara Tubete:</Text>
+            <TextInput style={styles.inputCompacto} keyboardType="numeric" value={taraTubete} onChangeText={setTaraTubete} selectTextOnFocus />
+          </View>
         </View>
 
         <View style={styles.rowDupla}>
-          <View style={styles.colunaSpinner}><Text style={styles.label}>Lâminas:</Text><InputSpinner max={200} min={0} step={1} skin="clean" value={numLaminas} onChange={setNumLaminas} width={110} color="#005b9f" /></View>
-          <View style={styles.colunaSpinner}><Text style={styles.label}>Paletes:</Text><InputSpinner max={10} min={0} step={1} skin="clean" value={numPaletes} onChange={setNumPaletes} width={110} color="#005b9f" /></View>
+          <View style={styles.colunaSpinner}>
+            <Text style={styles.label}>Lâminas:</Text>
+            <InputSpinner max={200} min={0} step={1} skin="clean" value={numLaminas} onChange={setNumLaminas} width={110} color="#005b9f" />
+          </View>
+          <View style={styles.colunaSpinner}>
+            <Text style={styles.label}>Paletes:</Text>
+            <InputSpinner max={10} min={0} step={1} skin="clean" value={numPaletes} onChange={setNumPaletes} width={110} color="#005b9f" />
+          </View>
         </View>
 
         <View style={styles.rowDupla}>
-          <View style={styles.colunaPesoBruto}><Text style={styles.labelInput}>Peso Bruto:</Text><TextInput style={styles.inputGigante} keyboardType="numeric" value={pesoBruto} onChangeText={setPesoBruto} selectTextOnFocus /></View>
-          <View style={styles.colunaEmLinha}><Text style={styles.labelInput}>Em Linha:</Text><TextInput style={styles.inputGigante} keyboardType="numeric" value={pesoEmLinha} onChangeText={setPesoEmLinha} selectTextOnFocus /></View>
+          <View style={styles.colunaPesoBruto}>
+            <Text style={styles.labelInput}>Peso Bruto:</Text>
+            <TextInput style={styles.inputGigante} keyboardType="numeric" value={pesoBruto} onChangeText={setPesoBruto} selectTextOnFocus />
+          </View>
+          <View style={styles.colunaEmLinha}>
+            <Text style={styles.labelInput}>Em Linha:</Text>
+            <TextInput style={styles.inputGigante} keyboardType="numeric" value={pesoEmLinha} onChangeText={setPesoEmLinha} selectTextOnFocus />
+          </View>
         </View>
 
         <View style={styles.obsContainer}>
@@ -179,16 +198,30 @@ export default function TelaDeContagem() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.rowFinal}><Text style={styles.labelFinal}>Peso Líquido Final:</Text><Text style={styles.valorLiquido}>{pesoLiquido}</Text></View>
+        <View style={styles.rowFinal}>
+          <Text style={styles.labelFinal}>Peso Líquido Final:</Text>
+          <Text style={styles.valorLiquido}>{pesoLiquido}</Text>
+        </View>
       </ScrollView>
 
-      <View style={styles.footer}>
-        {carregando ? <ActivityIndicator size="large" color="#F59E0B" style={{ flex: 1 }} /> : (
-          <><TouchableOpacity style={styles.btnCancel} onPress={() => router.back()}><Text style={styles.btnCancelText}>Cancelar</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.btnSave} onPress={salvarRegistro}><Text style={styles.btnSaveText}>Salvar</Text></TouchableOpacity></>
+      {/* RODAPÉ PROTEGIDO PELO SAFEAREAVIEW */}
+      <SafeAreaView edges={['bottom']} style={styles.footer}>
+        {carregando ? (
+          <ActivityIndicator size="large" color="#F59E0B" style={{ flex: 1 }} />
+        ) : (
+          <>
+            <TouchableOpacity style={styles.btnCancel} onPress={() => router.back()}>
+              <Text style={styles.btnCancelText}>Cancelar</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.btnSave} onPress={salvarRegistro}>
+              <Text style={styles.btnSaveText}>Salvar Contagem</Text>
+            </TouchableOpacity>
+          </>
         )}
-      </View>
+      </SafeAreaView>
 
+      {/* MODAIS */}
       <Modal visible={modalCameraVisivel} animationType="slide">
         <CameraView style={{ flex: 1 }} ref={cameraRef} active={modalCameraVisivel}>
           <View style={styles.cameraOverlay}>
@@ -240,11 +273,40 @@ const styles = StyleSheet.create({
   rowFinal: { backgroundColor: '#F3F4F6', padding: 12, borderRadius: 10, borderLeftWidth: 6, borderLeftColor: '#005b9f', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 3 },
   labelFinal: { fontSize: 14, color: '#005b9f', fontWeight: 'bold' },
   valorLiquido: { fontSize: 28, fontWeight: 'bold', color: '#1F2937' },
-  footer: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#E5E7EB', backgroundColor: '#FFF', paddingBottom: 30, paddingTop: 10 },
-  btnCancel: { flex: 1, alignItems: 'center' },
-  btnCancelText: { fontSize: 18, color: '#1F2937' },
-  btnSave: { flex: 1, alignItems: 'center' },
-  btnSaveText: { fontSize: 18, color: '#F59E0B', fontWeight: 'bold' },
+  
+  // ESTILO DO FOOTER CORRIGIDO
+  footer: { 
+    flexDirection: 'row', 
+    borderTopWidth: 1, 
+    borderTopColor: '#E5E7EB', 
+    backgroundColor: '#FFF', 
+    paddingTop: 12,
+    paddingBottom: 8, 
+    paddingHorizontal: 15,
+    alignItems: 'center'
+  },
+  btnCancel: { 
+    flex: 1, 
+    height: 50, 
+    alignItems: 'center', 
+    justifyContent: 'center' 
+  },
+  btnCancelText: { fontSize: 16, color: '#6B7280' },
+  btnSave: { 
+    flex: 1.5, 
+    height: 50, 
+    backgroundColor: '#F59E0B', 
+    borderRadius: 10, 
+    alignItems: 'center', 
+    justifyContent: 'center',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2
+  },
+  btnSaveText: { fontSize: 18, color: '#FFF', fontWeight: 'bold' },
+
   cameraOverlay: { flex: 1, justifyContent: 'space-between', padding: 30 },
   btnFecharCam: { alignSelf: 'flex-end', marginTop: 20 },
   btnCapturar: { alignSelf: 'center', marginBottom: 20 },

@@ -1,17 +1,16 @@
 import React, { useState, useCallback } from 'react';
 import { StyleSheet, Text, View, FlatList, TouchableOpacity, ActivityIndicator, Alert, ScrollView } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { supabase } from '../../src/supabase'; // Ajuste o caminho se necessário
+import { supabase } from '../../src/supabase'; 
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect } from 'expo-router';
 
-// DEFINIÇÃO DE LARGURA DAS COLUNAS (PARA SIMETRIA TOTAL)
-const COL_ITEM = 4;    // Código e Descrição
-const COL_FISICO = 2;  // Valor Físico
-const COL_SAP = 2;     // Valor SAP
-const COL_DESVIO = 2.5; // Desvio + Ícone + Grana
+const COL_ITEM = 4;
+const COL_FISICO = 2;
+const COL_SAP = 2;
+const COL_DESVIO = 2.5;
 
 export default function TelaDivergencia() {
   const [dataSelecionada, setDataSelecionada] = useState(new Date());
@@ -22,7 +21,24 @@ export default function TelaDivergencia() {
 
   const supervisores = ['Edevandro', 'Everaldo', 'Fabio', 'Joel', 'Marcelo', 'Samuel'];
 
-  // 1. LÓGICA DE TURNO 05H ÀS 05H
+  // --- NOVA FUNÇÃO DE FORMATAÇÃO (INFALÍVEL) ---
+  const formatarPeso = (valor: number) => {
+    if (valor === undefined || valor === null) return "0,00";
+    
+    // 1. Garante 2 casas decimais e transforma em string
+    // 2. Troca o ponto decimal por vírgula
+    // 3. Usa uma expressão regular para colocar o ponto de milhar
+    return valor
+      .toFixed(2)
+      .replace('.', ',')
+      .replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1.');
+  };
+
+  // --- FUNÇÃO PARA MOEDA (TAMBÉM MANUAL PARA GARANTIR) ---
+  const formatarMoedaManual = (valor: number) => {
+    return "R$ " + formatarPeso(valor);
+  };
+
   const obterFiltroTurno = (dataBase: Date) => {
     const inicio = new Date(dataBase);
     inicio.setHours(5, 0, 0, 0);
@@ -32,25 +48,19 @@ export default function TelaDivergencia() {
     return { inicio: inicio.toISOString(), fim: fim.toISOString() };
   };
 
-  // 2. BUSCA DE DADOS COM CRUZAMENTO (FISICO vs SAP HISTÓRICO + GRANA)
   const buscarDados = async () => {
     setCarregando(true);
     const { inicio, fim } = obterFiltroTurno(dataSelecionada);
     
-    // -------------------------------------------------------------
-    // CORREÇÃO DO FUSO HORÁRIO: Pega a data exata local (YYYY-MM-DD)
-    // -------------------------------------------------------------
     const ano = dataSelecionada.getFullYear();
     const mes = String(dataSelecionada.getMonth() + 1).padStart(2, '0');
     const dia = String(dataSelecionada.getDate()).padStart(2, '0');
     const dataLocalStr = `${ano}-${mes}-${dia}`;
     
-    // Cria uma "janela" que engloba o dia todo no Supabase
     const sapInicio = `${dataLocalStr}T00:00:00.000Z`;
     const sapFim = `${dataLocalStr}T23:59:59.999Z`;
 
     try {
-      // 1. Busca os dados mestres do item (Descricao, Preço, Supervisor)
       const { data: itens, error: errItens } = await supabase
         .from('itens')
         .select('id, descricao, preco_unitario')
@@ -58,7 +68,6 @@ export default function TelaDivergencia() {
 
       if (errItens) throw errItens;
 
-      // 2. Busca as contagens FÍSICAS do turno selecionado
       const { data: contagens, error: errCont } = await supabase
         .from('contagens')
         .select('item_id, peso_liquido_calculado')
@@ -67,7 +76,6 @@ export default function TelaDivergencia() {
 
       if (errCont) throw errCont;
 
-      // 3. Busca o saldo SAP ESPECÍFICO (usando a janela do dia)
       const { data: estoqueSap, error: errSap } = await supabase
         .from('estoque_sap')
         .select('codigo_sap, saldo_sap')
@@ -76,18 +84,14 @@ export default function TelaDivergencia() {
 
       if (errSap) throw errSap;
 
-      // Consolida tudo e calcula a grana
       const listaConsolidada = itens.map(item => {
-        // Soma o físico
         const totalFisico = contagens
           ?.filter(c => c.item_id === item.id)
           .reduce((acc, curr) => acc + (curr.peso_liquido_calculado || 0), 0);
 
-        // Pega o SAP exato daquele dia (forçando string para evitar bugs de tipagem)
         const itemSap = estoqueSap?.find(e => String(e.codigo_sap) === String(item.id));
         const sap = itemSap ? (itemSap.saldo_sap || 0) : 0; 
 
-        // Cálculos
         const desvio = (totalFisico || 0) - sap;
         const precoUnit = item.preco_unitario || 0;
         const impacto = desvio * precoUnit;
@@ -110,14 +114,12 @@ export default function TelaDivergencia() {
     }
   };
 
-  // 🔄 O "DESPERTADOR" DA ABA
   useFocusEffect(
     useCallback(() => {
       buscarDados();
     }, [supervisorAtivo, dataSelecionada])
   );
 
-  // Função disparada quando escolhe a data no calendário
   const onChangeDate = (event: any, selectedDate?: Date) => {
     setShowDatePicker(false);
     if (selectedDate) {
@@ -125,13 +127,12 @@ export default function TelaDivergencia() {
     }
   };
 
-  // 3. EXPORTAÇÃO CSV
   const exportarCSV = async () => {
     if (lista.length === 0) return;
     
     let csv = "ITEM;DESCRICAO;FISICO;SAP;DESVIO;IMPACTO (R$)\n";
     lista.forEach(i => {
-      csv += `${i.id};${i.descricao?.replace(/;/g, ",")};${i.fisico.toFixed(2).replace(".", ",")};${i.sap.toFixed(2).replace(".", ",")};${i.desvio.toFixed(2).replace(".", ",")};${i.impacto.toFixed(2).replace(".", ",")}\n`;
+      csv += `${i.id};${i.descricao?.replace(/;/g, ",")};${formatarPeso(i.fisico)};${formatarPeso(i.sap)};${formatarPeso(i.desvio)};${formatarPeso(i.impacto)}\n`;
     });
 
     const uri = FileSystem.documentDirectory + `Divergencia_${supervisorAtivo}.csv`;
@@ -141,16 +142,13 @@ export default function TelaDivergencia() {
 
   return (
     <View style={styles.container}>
-      {/* HEADER AZUL PADRÃO YPÊ */}
       <View style={styles.headerAzul}>
         <Text style={styles.titlePrincipal}>Divergência de Inventário</Text>
-        
         <View style={styles.barraFiltro}>
           <TouchableOpacity style={styles.dataContainer} onPress={() => setShowDatePicker(true)}>
             <Ionicons name="calendar-outline" size={20} color="#FFF" />
             <Text style={styles.txtData}>{dataSelecionada.toLocaleDateString('pt-BR')}</Text>
           </TouchableOpacity>
-          
           <View style={styles.acoesHeader}>
             <TouchableOpacity onPress={exportarCSV} style={styles.iconBtn}>
               <MaterialCommunityIcons name="file-excel" size={24} color="#FFF" />
@@ -162,7 +160,6 @@ export default function TelaDivergencia() {
         </View>
       </View>
 
-      {/* COMPONENTE DO CALENDÁRIO OCULTO */}
       {showDatePicker && (
         <DateTimePicker
           value={dataSelecionada}
@@ -172,7 +169,6 @@ export default function TelaDivergencia() {
         />
       )}
 
-      {/* FILTRO DE SUPERVISORES */}
       <View style={styles.containerSupervisores}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 15 }}>
           {supervisores.map(sup => (
@@ -187,7 +183,6 @@ export default function TelaDivergencia() {
         </ScrollView>
       </View>
 
-      {/* CABEÇALHO DA TABELA */}
       <View style={styles.tableHeader}>
         <Text style={[styles.txtHead, { flex: COL_ITEM, textAlign: 'left' }]}>Item</Text>
         <Text style={[styles.txtHead, { flex: COL_FISICO, textAlign: 'center' }]}>Físico</Text>
@@ -203,23 +198,19 @@ export default function TelaDivergencia() {
           keyExtractor={item => item.id}
           renderItem={({ item }) => (
             <View style={styles.row}>
-              {/* COLUNA ITEM */}
               <View style={{ flex: COL_ITEM }}>
                 <Text style={styles.itemCode}>{item.id}</Text>
                 <Text style={styles.itemDesc} numberOfLines={1}>{item.descricao}</Text>
               </View>
 
-              {/* COLUNA FÍSICO */}
               <View style={{ flex: COL_FISICO, alignItems: 'center' }}>
-                <Text style={styles.valFisico}>{item.fisico.toFixed(2)}</Text>
+                <Text style={styles.valFisico}>{formatarPeso(item.fisico)}</Text>
               </View>
 
-              {/* COLUNA SAP */}
               <View style={{ flex: COL_SAP, alignItems: 'center' }}>
-                <Text style={styles.valSap}>{item.sap.toFixed(2)}</Text>
+                <Text style={styles.valSap}>{formatarPeso(item.sap)}</Text>
               </View>
 
-              {/* COLUNA DESVIO COM ALERTA E GRANA */}
               <View style={{ flex: COL_DESVIO, alignItems: 'flex-end' }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   {item.desvio !== 0 && (
@@ -231,13 +222,12 @@ export default function TelaDivergencia() {
                     />
                   )}
                   <Text style={[styles.valDesvio, { color: item.desvio < 0 ? '#EF4444' : item.desvio > 0 ? '#F59E0B' : '#10B981' }]}>
-                    {item.desvio > 0 ? `+${item.desvio.toFixed(2)}` : item.desvio.toFixed(2)}
+                    {item.desvio > 0 ? `+${formatarPeso(item.desvio)}` : formatarPeso(item.desvio)}
                   </Text>
                 </View>
                 
-                {/* RENDERIZAÇÃO DA GRANA */}
                 <Text style={[styles.valGrana, { color: item.impacto < 0 ? '#EF4444' : '#64748B' }]}>
-                  {item.impacto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  {formatarMoedaManual(item.impacto)}
                 </Text>
               </View>
             </View>
