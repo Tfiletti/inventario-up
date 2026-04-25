@@ -12,7 +12,6 @@ export default function TelaEditarContagem() {
   const [carregando, setCarregando] = useState(true);
   const [itemData, setItemData] = useState<any>(null);
 
-  // Estados
   const [tubetes, setTubetes] = useState<any>(0);
   const [tara, setTara] = useState('0');
   const [laminas, setLaminas] = useState<any>(0);
@@ -23,7 +22,6 @@ export default function TelaEditarContagem() {
   const [fotoUrl, setFotoUrl] = useState<string | null>(null);
   const [pesoLiquido, setPesoLiquido] = useState(0);
 
-  // Estados Calculadora
   const [modalCalcVisivel, setModalCalcVisivel] = useState(false);
   const [listaCalculo, setListaCalculo] = useState<{qtd: string, peso: string}[]>([]);
   const [tempQtd, setTempQtd] = useState('');
@@ -35,7 +33,7 @@ export default function TelaEditarContagem() {
 
   const carregarDados = async () => {
     try {
-      const { data, error } = await supabase.from('contagens').select('*, itens(descricao)').eq('id', id).single();
+      const { data, error } = await supabase.from('contagens').select('*, itens(descricao, codigo_sap)').eq('id', id).single();
       if (error) throw error;
       if (data) {
         setItemData(data);
@@ -57,23 +55,18 @@ export default function TelaEditarContagem() {
 
   useEffect(() => { carregarDados(); }, [id]);
 
-  // --- MATEMÁTICA YPÊ PROTEGIDA ---
   useEffect(() => {
     const paraNum = (v: any) => {
       if (v === '' || v === null || v === undefined) return 0;
       return parseFloat(v.toString().replace(',', '.')) || 0;
     };
-
     const bruto = paraNum(pesoBruto);
     const taraUni = paraNum(tara);
     const nTub = paraNum(tubetes);
     const nLam = paraNum(laminas);
     const nPal = paraNum(paletes);
     const somaLinha = paraNum(emLinha);
-
     const descontoTaras = (nTub * taraUni) + (nLam * 0.4) + (nPal * 20);
-    
-    // Regra: Desconto só atua no Bruto. Se Bruto < Desconto, saldo balança é 0.
     const saldoBalanca = Math.max(0, bruto - descontoTaras);
     setPesoLiquido(saldoBalanca + somaLinha);
   }, [pesoBruto, tubetes, tara, emLinha, laminas, paletes]);
@@ -91,17 +84,32 @@ export default function TelaEditarContagem() {
     setListaCalculo([]);
   };
 
-  // --- FUNÇÃO SALVAR COM VALIDAÇÃO ---
+  // --- FUNÇÃO EXCLUIR REGISTRO ---
+  const excluir = () => {
+    Alert.alert("🗑️ Excluir Registro", "Esta ação não pode ser desfeita. Deseja realmente apagar esta contagem?", [
+      { text: "Cancelar", style: "cancel" },
+      { 
+        text: "Excluir", 
+        style: "destructive", 
+        onPress: async () => {
+          try {
+            const { error } = await supabase.from('contagens').delete().eq('id', id);
+            if (error) throw error;
+            Alert.alert("Sucesso", "Contagem excluída!");
+            router.back();
+          } catch (err: any) {
+            Alert.alert("Erro ao excluir", err.message);
+          }
+        } 
+      }
+    ]);
+  };
+
   const salvar = async () => {
-    // 🛡️ TRAVA DE SEGURANÇA: Peso Líquido Final não pode ser <= 0
     if (pesoLiquido <= 0) {
-      Alert.alert(
-        "Peso Inválido", 
-        "As alterações resultaram em um peso líquido final de zero ou negativo. O sistema não permite este registro."
-      );
+      Alert.alert("Peso Inválido", "As alterações resultaram em um peso líquido final de zero ou negativo.");
       return;
     }
-
     try {
       const { error } = await supabase.from('contagens').update({
         peso_bruto: parseFloat(pesoBruto.replace(',', '.')),
@@ -115,13 +123,10 @@ export default function TelaEditarContagem() {
           paletes: parseInt(paletes) || 0 
         }
       }).eq('id', id);
-      
       if (error) throw error;
-      Alert.alert("Sucesso", "Registro atualizado no sistema!");
+      Alert.alert("Sucesso", "Registro atualizado!");
       router.back();
-    } catch (err: any) { 
-      Alert.alert("Erro ao salvar", err.message); 
-    }
+    } catch (err: any) { Alert.alert("Erro ao salvar", err.message); }
   };
 
   if (carregando) return <ActivityIndicator size="large" color="#005b9f" style={{flex:1}} />;
@@ -130,8 +135,14 @@ export default function TelaEditarContagem() {
     <View style={styles.container}>
       <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 120 }]}>
         <View style={styles.header}>
-            <View style={styles.sapBadge}><MaterialCommunityIcons name="package-variant" size={18} color="#B45309" /><Text style={styles.sapText}>{itemData?.item_id}</Text></View>
-            <TouchableOpacity onPress={() => {}}><Ionicons name="trash-outline" size={26} color="#EF4444" /></TouchableOpacity>
+            <View style={styles.sapBadge}>
+              <MaterialCommunityIcons name="package-variant" size={18} color="#B45309" />
+              <Text style={styles.sapText}>{itemData?.itens?.codigo_sap || 'S/C'}</Text>
+            </View>
+            {/* O BOTÃO AGORA CHAMA A FUNÇÃO EXCLUIR */}
+            <TouchableOpacity onPress={excluir} style={styles.btnExcluir}>
+                <Ionicons name="trash-outline" size={26} color="#EF4444" />
+            </TouchableOpacity>
         </View>
         <Text style={styles.itemDesc}>{itemData?.itens?.descricao}</Text>
 
@@ -141,7 +152,6 @@ export default function TelaEditarContagem() {
           <CardStepper label="Lâminas (-0.4)" value={laminas} onChangeText={setLaminas} onAdd={() => setLaminas((p: any) => (parseInt(p) || 0) + 1)} onSub={() => setLaminas((p: any) => Math.max(0, (parseInt(p) || 0) - 1))} />
           <CardStepper label="Paletes (-20)" value={paletes} onChangeText={setPaletes} onAdd={() => setPaletes((p: any) => (parseInt(p) || 0) + 1)} onSub={() => setPaletes((p: any) => Math.max(0, (parseInt(p) || 0) - 1))} />
           <CardInput label="Peso Bruto" value={pesoBruto} onChange={setPesoBruto} color="#F59E0B" />
-          
           <View style={[styles.card, { borderLeftWidth: 4, borderLeftColor: '#10B981' }]}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={styles.cardLabel}>Em Linha:</Text>
@@ -197,23 +207,22 @@ export default function TelaEditarContagem() {
   );
 }
 
-// COMPONENTES AUXILIARES
 const CardStepper = ({ label, value, onAdd, onSub, onChangeText }: any) => (
-  <View style={styles.card}>
-    <Text style={styles.cardLabel}>{label}:</Text>
-    <View style={styles.stepper}>
-        <TouchableOpacity onPress={onSub} style={styles.stepBtnContainer}><Text style={styles.stepBtn}>-</Text></TouchableOpacity>
-        <TextInput style={styles.stepInput} value={String(value)} onChangeText={onChangeText} keyboardType="numeric" selectTextOnFocus onBlur={() => { if (value === '') onChangeText('0'); }} />
-        <TouchableOpacity onPress={onAdd} style={styles.stepBtnContainer}><Text style={styles.stepBtn}>+</Text></TouchableOpacity>
+    <View style={styles.card}>
+      <Text style={styles.cardLabel}>{label}:</Text>
+      <View style={styles.stepper}>
+          <TouchableOpacity onPress={onSub} style={styles.stepBtnContainer}><Text style={styles.stepBtn}>-</Text></TouchableOpacity>
+          <TextInput style={styles.stepInput} value={String(value)} onChangeText={onChangeText} keyboardType="numeric" selectTextOnFocus onBlur={() => { if (value === '') onChangeText('0'); }} />
+          <TouchableOpacity onPress={onAdd} style={styles.stepBtnContainer}><Text style={styles.stepBtn}>+</Text></TouchableOpacity>
+      </View>
     </View>
-  </View>
 );
 
 const CardInput = ({ label, value, onChange, color }: any) => (
-  <View style={[styles.card, { borderLeftWidth: 4, borderLeftColor: color }]}>
-    <Text style={styles.cardLabel}>{label}:</Text>
-    <TextInput style={styles.cardInput} value={value} onChangeText={onChange} keyboardType="numeric" selectTextOnFocus />
-  </View>
+    <View style={[styles.card, { borderLeftWidth: 4, borderLeftColor: color }]}>
+      <Text style={styles.cardLabel}>{label}:</Text>
+      <TextInput style={styles.cardInput} value={value} onChangeText={onChange} keyboardType="numeric" selectTextOnFocus />
+    </View>
 );
 
 const styles = StyleSheet.create({
@@ -221,7 +230,8 @@ const styles = StyleSheet.create({
   scroll: { padding: 15, paddingTop: 50 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
   sapBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#E9ECEF', padding: 10, borderRadius: 12 },
-  sapText: { marginLeft: 5, fontWeight: 'bold', fontSize: 18 },
+  sapText: { marginLeft: 5, fontWeight: 'bold', fontSize: 18, color: '#1E293B' },
+  btnExcluir: { padding: 8 },
   itemDesc: { fontSize: 14, color: '#6C757D', fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
   card: { backgroundColor: '#FFF', width: '48%', padding: 15, borderRadius: 16, marginBottom: 15, elevation: 2 },
