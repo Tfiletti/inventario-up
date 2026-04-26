@@ -13,20 +13,26 @@ export default function TabLayout() {
         tabBarLabelStyle: {
           fontSize: 11,
           fontWeight: '700',
-          marginBottom: 8,
+          marginBottom: 5, // Ajuste fino para o texto não colar na borda
         },
         tabBarStyle: {
+          // --- CONFIGURAÇÃO DA MARCA SMART COUNT (FLUTUANTE) ---
+          position: 'absolute', 
+          bottom: Platform.OS === 'android' ? 20 : 30, // Recuo estratégico para fugir dos botões
+          left: 20,
+          right: 20,
           backgroundColor: '#FFFFFF',
-          borderTopWidth: 1,
-          borderTopColor: '#E2E8F0',
-          // Aumentamos a altura e o padding para fugir dos botões do Android
-          height: Platform.OS === 'android' ? 85 : 95, 
-          paddingBottom: Platform.OS === 'android' ? 20 : 30,
+          borderRadius: 25, 
+          height: 70, 
+          elevation: 8, // Sombra para o Android
+          shadowColor: '#000', // Sombra para iOS
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.1,
+          shadowRadius: 10,
+          borderTopWidth: 0, // Mata a linha cinza padrão
           paddingTop: 10,
-          // Removemos o absolute para evitar conflito de sobreposição
-          elevation: 10,
-          borderTopLeftRadius: 20,
-          borderTopRightRadius: 20,
+          paddingBottom: Platform.OS === 'android' ? 10 : 25,
+          // ----------------------------------------------------
         },
       }}
     >
@@ -36,7 +42,7 @@ export default function TabLayout() {
         options={{
           title: 'Início',
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? "home" : "home-outline"} size={26} color={color} />
+            <Ionicons name={focused ? "home" : "home-outline"} size={24} color={color} />
           ),
         }}
       />
@@ -49,7 +55,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color, focused }) => (
             <MaterialCommunityIcons 
               name={focused ? "clipboard-text-play" : "clipboard-text-play-outline"} 
-              size={26} 
+              size={24} 
               color={color} 
             />
           ),
@@ -62,18 +68,17 @@ export default function TabLayout() {
         options={{
           title: 'Relatório',
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? "analytics" : "analytics-outline"} size={26} color={color} />
+            <Ionicons name={focused ? "analytics" : "analytics-outline"} size={24} color={color} />
           ),
         }}
       />
 
       {/* --- TELAS ONDE A BARRA DEVE SUMIR --- */}
-
       <Tabs.Screen 
         name="contar" 
         options={{ 
           href: null,
-          tabBarStyle: { display: 'none' } // Isso esconde a barra nesta tela
+          tabBarStyle: { display: 'none' } 
         }} 
       />
 
@@ -81,7 +86,7 @@ export default function TabLayout() {
         name="editar" 
         options={{ 
           href: null,
-          tabBarStyle: { display: 'none' } // Isso esconde a barra nesta tela
+          tabBarStyle: { display: 'none' } 
         }} 
       />
 

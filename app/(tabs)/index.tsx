@@ -3,7 +3,6 @@ import { StyleSheet, Text, View, FlatList, ActivityIndicator, TouchableOpacity, 
 import { useRouter } from 'expo-router';
 import { supabase } from '../../src/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-// O IMPORT QUE FALTOU ESTÁ AQUI:
 import { Ionicons } from '@expo/vector-icons'; 
 
 const HeaderHome = ({ topInset }: { topInset: number }) => (
@@ -36,10 +35,14 @@ export default function TelaInicial() {
     buscarFamilias();
   }, []);
 
-  const aoClicarNaFamilia = (familiaId, familiaNome) => {
+  // --- ALTERAÇÃO AQUI: DIRETO PARA ITENS ---
+  const aoClicarNaFamilia = (familiaId: string, familiaNome: string) => {
     router.push({
-      pathname: '/setup',
-      params: { id: familiaId, nome: familiaNome }
+      pathname: '/itens', // Agora pula a tela de setup/area
+      params: { 
+        familiaId: familiaId, 
+        familiaNome: familiaNome 
+      }
     });
   };
 
@@ -56,9 +59,9 @@ export default function TelaInicial() {
         ) : (
           <FlatList
             data={familias}
-            keyExtractor={(item) => item.id}
+            keyExtractor={(item) => item.id.toString()}
             contentContainerStyle={{ 
-              paddingBottom: insets.bottom + 120 
+              paddingBottom: insets.bottom + 120 // Espaço para a Tab Bar Flutuante
             }}
             renderItem={({ item }) => (
               <TouchableOpacity 
@@ -68,7 +71,6 @@ export default function TelaInicial() {
               >
                 <View style={styles.cardHeader}>
                   <Text style={styles.cardTag}>Rótulos e Embalagens</Text>
-                  {/* O uso do Ionicons aqui agora vai funcionar: */}
                   <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
                 </View>
                 <Text style={styles.cardTitle}>{item.nome}</Text>

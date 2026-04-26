@@ -1,40 +1,43 @@
-import React, { useState, useCallback } from 'react';
-import { StyleSheet, Text, View, FlatList, TouchableOpacity, ActivityIndicator, Alert, ScrollView } from 'react-native';
+import React, { useState, useCallback, useMemo } from 'react'; // Adicionado useMemo
+import { StyleSheet, Text, View, FlatList, TouchableOpacity, ActivityIndicator, Alert, ScrollView, TextInput } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { supabase } from '../../src/supabase'; 
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect } from 'expo-router';
-// 1. Importação essencial para ler o tamanho da barra do Android
 import { useSafeAreaInsets } from 'react-native-safe-area-context'; 
 
-const COL_ITEM = 4;
+const COL_ITEM = 3.5;
 const COL_FISICO = 2;
 const COL_SAP = 2;
 const COL_DESVIO = 2.5;
 
+type SortConfig = {
+  key: 'id' | 'fisico' | 'sap' | 'desvio';
+  direction: 'asc' | 'desc';
+}
+
 export default function TelaDivergencia() {
-  const insets = useSafeAreaInsets(); // 2. Pegando as medidas do sistema
+  const insets = useSafeAreaInsets();
   const [dataSelecionada, setDataSelecionada] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [supervisorAtivo, setSupervisorAtivo] = useState('Edevandro');
   const [lista, setLista] = useState<any[]>([]);
   const [carregando, setCarregando] = useState(true);
+  
+  // NOVOS ESTADOS: Busca e Ordenação
+  const [busca, setBusca] = useState('');
+  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'desvio', direction: 'desc' });
 
   const supervisores = ['Edevandro', 'Everaldo', 'Fabio', 'Joel', 'Marcelo', 'Samuel'];
 
   const formatarPeso = (valor: number) => {
     if (valor === undefined || valor === null) return "0,00";
-    return valor
-      .toFixed(2)
-      .replace('.', ',')
-      .replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1.');
+    return valor.toFixed(2).replace('.', ',').replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1.');
   };
 
-  const formatarMoedaManual = (valor: number) => {
-    return "R$ " + formatarPeso(valor);
-  };
+  const formatarMoedaManual = (valor: number) => "R$ " + formatarPeso(valor);
 
   const obterFiltroTurno = (dataBase: Date) => {
     const inicio = new Date(dataBase);
@@ -48,12 +51,10 @@ export default function TelaDivergencia() {
   const buscarDados = async () => {
     setCarregando(true);
     const { inicio, fim } = obterFiltroTurno(dataSelecionada);
-    
     const ano = dataSelecionada.getFullYear();
     const mes = String(dataSelecionada.getMonth() + 1).padStart(2, '0');
     const dia = String(dataSelecionada.getDate()).padStart(2, '0');
     const dataLocalStr = `${ano}-${mes}-${dia}`;
-    
     const sapInicio = `${dataLocalStr}T00:00:00.000Z`;
     const sapFim = `${dataLocalStr}T23:59:59.999Z`;
 
@@ -88,10 +89,8 @@ export default function TelaDivergencia() {
 
         const itemSap = estoqueSap?.find(e => String(e.codigo_sap) === String(item.id));
         const sap = itemSap ? (itemSap.saldo_sap || 0) : 0; 
-
         const desvio = (totalFisico || 0) - sap;
-        const precoUnit = item.preco_unitario || 0;
-        const impacto = desvio * precoUnit;
+        const impacto = desvio * (item.preco_unitario || 0);
 
         return {
           id: item.id,
@@ -117,17 +116,59 @@ export default function TelaDivergencia() {
     }, [supervisorAtivo, dataSelecionada])
   );
 
+  // LÓGICA DE FILTRAGEM E ORDENAÇÃO (Processamento Local)
+  const listaProcessada = useMemo(() => {
+    let resultado = [...lista];
+
+    // Filtro de Busca
+    if (busca) {
+      const termo = busca.toLowerCase();
+      resultado = resultado.filter(i => 
+        i.id.toLowerCase().includes(termo) || 
+        i.descricao.toLowerCase().includes(termo)
+      );
+    }
+
+    // Ordenação
+    if (sortConfig.key) {
+      resultado.sort((a, b) => {
+        let valA = a[sortConfig.key];
+        let valB = b[sortConfig.key];
+        
+        // Tratar strings para comparação correta
+        if (typeof valA === 'string') valA = valA.toLowerCase();
+        if (typeof valB === 'string') valB = valB.toLowerCase();
+
+        if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return resultado;
+  }, [lista, busca, sortConfig]);
+
+  const alternarOrdem = (key: SortConfig['key']) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const renderSortIcon = (key: SortConfig['key']) => {
+    if (sortConfig.key !== key) return <Ionicons name="swap-vertical" size={12} color="#CBD5E1" />;
+    return <Ionicons name={sortConfig.direction === 'asc' ? "arrow-up" : "arrow-down"} size={12} color="#005b9f" />;
+  };
+
   const onChangeDate = (event: any, selectedDate?: Date) => {
     setShowDatePicker(false);
-    if (selectedDate) {
-      setDataSelecionada(selectedDate);
-    }
+    if (selectedDate) setDataSelecionada(selectedDate);
   };
 
   const exportarCSV = async () => {
-    if (lista.length === 0) return;
+    if (listaProcessada.length === 0) return;
     let csv = "ITEM;DESCRICAO;FISICO;SAP;DESVIO;IMPACTO (R$)\n";
-    lista.forEach(i => {
+    listaProcessada.forEach(i => {
       csv += `${i.id};${i.descricao?.replace(/;/g, ",")};${formatarPeso(i.fisico)};${formatarPeso(i.sap)};${formatarPeso(i.desvio)};${formatarPeso(i.impacto)}\n`;
     });
     const uri = FileSystem.documentDirectory + `Divergencia_${supervisorAtivo}.csv`;
@@ -139,6 +180,24 @@ export default function TelaDivergencia() {
     <View style={styles.container}>
       <View style={styles.headerAzul}>
         <Text style={styles.titlePrincipal}>Divergência de Inventário</Text>
+        
+        {/* BARRA DE BUSCA */}
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={18} color="#94A3B8" />
+          <TextInput 
+            style={styles.inputBusca}
+            placeholder="Buscar por código ou descrição..."
+            value={busca}
+            onChangeText={setBusca}
+            placeholderTextColor="#94A3B8"
+          />
+          {busca !== '' && (
+            <TouchableOpacity onPress={() => setBusca('')}>
+              <Ionicons name="close-circle" size={18} color="#94A3B8" />
+            </TouchableOpacity>
+          )}
+        </View>
+
         <View style={styles.barraFiltro}>
           <TouchableOpacity style={styles.dataContainer} onPress={() => setShowDatePicker(true)}>
             <Ionicons name="calendar-outline" size={20} color="#FFF" />
@@ -164,7 +223,7 @@ export default function TelaDivergencia() {
           {supervisores.map(sup => (
             <TouchableOpacity 
               key={sup} 
-              onPress={() => setSupervisorAtivo(sup)}
+              onPress={() => { setSupervisorAtivo(sup); setBusca(''); }}
               style={[styles.badge, supervisorAtivo === sup && styles.badgeAtivo]}
             >
               <Text style={[styles.txtBadge, supervisorAtivo === sup && styles.txtBadgeAtivo]}>{sup}</Text>
@@ -173,23 +232,36 @@ export default function TelaDivergencia() {
         </ScrollView>
       </View>
 
+      {/* CABEÇALHO COM CLIQUE PARA ORDENAR */}
       <View style={styles.tableHeader}>
-        <Text style={[styles.txtHead, { flex: COL_ITEM, textAlign: 'left' }]}>Item</Text>
-        <Text style={[styles.txtHead, { flex: COL_FISICO, textAlign: 'center' }]}>Físico</Text>
-        <Text style={[styles.txtHead, { flex: COL_SAP, textAlign: 'center' }]}>SAP</Text>
-        <Text style={[styles.txtHead, { flex: COL_DESVIO, textAlign: 'right' }]}>Desvio</Text>
+        <TouchableOpacity style={[styles.headBtn, { flex: COL_ITEM }]} onPress={() => alternarOrdem('id')}>
+          <Text style={styles.txtHead}>Item</Text>
+          {renderSortIcon('id')}
+        </TouchableOpacity>
+        
+        <TouchableOpacity style={[styles.headBtn, { flex: COL_FISICO, justifyContent: 'center' }]} onPress={() => alternarOrdem('fisico')}>
+          <Text style={styles.txtHead}>Físico</Text>
+          {renderSortIcon('fisico')}
+        </TouchableOpacity>
+        
+        <TouchableOpacity style={[styles.headBtn, { flex: COL_SAP, justifyContent: 'center' }]} onPress={() => alternarOrdem('sap')}>
+          <Text style={styles.txtHead}>SAP</Text>
+          {renderSortIcon('sap')}
+        </TouchableOpacity>
+        
+        <TouchableOpacity style={[styles.headBtn, { flex: COL_DESVIO, justifyContent: 'flex-end' }]} onPress={() => alternarOrdem('desvio')}>
+          <Text style={styles.txtHead}>Desvio</Text>
+          {renderSortIcon('desvio')}
+        </TouchableOpacity>
       </View>
 
       {carregando ? (
         <ActivityIndicator size="large" color="#005b9f" style={{ marginTop: 50 }} />
       ) : (
         <FlatList
-          data={lista}
+          data={listaProcessada} // Usa a lista filtrada e ordenada
           keyExtractor={item => item.id}
-          // 3. A MÁGICA ACONTECE AQUI:
-          contentContainerStyle={{ 
-            paddingBottom: insets.bottom + 100 // Garante que a lista termine acima da Tab Bar
-          }}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
           renderItem={({ item }) => (
             <View style={styles.row}>
               <View style={{ flex: COL_ITEM }}>
@@ -229,15 +301,25 @@ export default function TelaDivergencia() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFF' },
-  headerAzul: { backgroundColor: '#005b9f', paddingTop: 60, paddingBottom: 25, paddingHorizontal: 20 },
-  titlePrincipal: { fontSize: 24, fontWeight: 'bold', color: '#FFF', marginBottom: 15 },
+  headerAzul: { backgroundColor: '#005b9f', paddingTop: 60, paddingBottom: 20, paddingHorizontal: 20 },
+  titlePrincipal: { fontSize: 22, fontWeight: 'bold', color: '#FFF', marginBottom: 15 },
+  searchBar: {
+    backgroundColor: '#FFF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 45,
+    marginBottom: 15
+  },
+  inputBusca: { flex: 1, marginLeft: 10, fontSize: 14, color: '#1E293B' },
   barraFiltro: { 
     backgroundColor: 'rgba(255,255,255,0.15)', 
     borderRadius: 12, 
     flexDirection: 'row', 
     alignItems: 'center', 
     justifyContent: 'space-between',
-    padding: 12 
+    padding: 10 
   },
   dataContainer: { flexDirection: 'row', alignItems: 'center', padding: 4 },
   txtData: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginLeft: 10 },
@@ -256,6 +338,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E2E8F0'
   },
+  headBtn: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   txtHead: { fontSize: 11, fontWeight: '900', color: '#94A3B8', textTransform: 'uppercase' },
   row: { 
     flexDirection: 'row', 
