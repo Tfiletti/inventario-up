@@ -3,16 +3,20 @@ import { StyleSheet, Text, View, FlatList, ActivityIndicator, TouchableOpacity, 
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons'; 
 import { supabase } from '../../src/supabase';
-// 1. Importação essencial para ajuste de área segura
 import { useSafeAreaInsets } from 'react-native-safe-area-context'; 
+
+// 1. IMPORTAÇÃO DO NOSSO CÉREBRO SAAS (O Crachá)
+import { useAuth } from '../../src/context/AuthContext'; 
 
 export default function TelaRegistros() {
   const [registros, setRegistros] = useState<any[]>([]);
   const [carregando, setCarregando] = useState(true);
   const router = useRouter();
-  const insets = useSafeAreaInsets(); // 2. Hook de GPS do sistema
+  const insets = useSafeAreaInsets(); 
+  
+  // 2. PUXANDO O ID DA ORGANIZAÇÃO (Ypê)
+  const { organizacao_id } = useAuth(); 
 
-  // --- FUNÇÃO DE FORMATAÇÃO (PADRÃO SMARTCOUNT) ---
   const formatarPeso = (valor: number) => {
     if (valor === undefined || valor === null) return "0,00";
     return valor
@@ -36,6 +40,9 @@ export default function TelaRegistros() {
   };
 
   async function buscarRegistros() {
+    // 3. TRAVA DE SEGURANÇA: Se não tem org_id, nem bate no banco
+    if (!organizacao_id) return; 
+
     setCarregando(true);
     const { inicio, fim } = obterFiltroTurno();
     
@@ -43,6 +50,7 @@ export default function TelaRegistros() {
       const { data, error } = await supabase
         .from('contagens')
         .select('*, itens(*), areas(*)')
+        .eq('organizacao_id', organizacao_id) // 4. A CHAVE MESTRA: Filtra só a sua fábrica!
         .gte('data_hora', inicio)
         .lte('data_hora', fim)
         .order('data_hora', { ascending: false });
@@ -50,17 +58,16 @@ export default function TelaRegistros() {
       if (error) throw error;
       setRegistros(data || []);
     } catch (err: any) {
-      console.error(err.message);
+      console.error("Erro ao buscar registros:", err.message);
     } finally {
       setCarregando(false);
     }
   }
 
-  // 3. Atualiza sempre que o supervisor abrir a aba (mais confiável)
   useFocusEffect(
     useCallback(() => {
       buscarRegistros();
-    }, [])
+    }, [organizacao_id]) // Recarrega se o org_id mudar
   );
 
   return (
@@ -79,7 +86,6 @@ export default function TelaRegistros() {
         data={registros}
         keyExtractor={(item) => item.id.toString()}
         refreshControl={<RefreshControl refreshing={carregando} onRefresh={buscarRegistros} color="#005b9f" />}
-        // 4. O ajuste mestre para não ficar atrás da Tab Bar
         contentContainerStyle={{ 
             paddingBottom: insets.bottom + 120,
             paddingTop: 10
@@ -118,7 +124,7 @@ export default function TelaRegistros() {
               <Text style={styles.txtDesc} numberOfLines={2}>{item.itens?.descricao}</Text>
               <View style={styles.pesoContainer}>
                 <Text style={styles.txtPeso}>{formatarPeso(item.peso_liquido_calculado)}</Text>
-                <Text style={styles.unitText}>{item.itens?.tipo_calculo === 'unidade' ? 'un' : 'kg'}</Text>
+                <Text style={styles.unitText}>{item.itens?.unidade_medida || 'kg'}</Text>
               </View>
             </View>
           </TouchableOpacity>

@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { supabase } from '../../src/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons'; 
+import { useAuth } from '../../src/context/AuthContext'; 
 
 const HeaderHome = ({ topInset }: { topInset: number }) => (
   <View style={[styles.header, { paddingTop: topInset + 15 }]}>
@@ -25,6 +26,8 @@ export default function TelaInicial() {
   const [carregando, setCarregando] = useState(true);
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  
+  const { role } = useAuth();
 
   useEffect(() => {
     async function buscarFamilias() {
@@ -35,10 +38,9 @@ export default function TelaInicial() {
     buscarFamilias();
   }, []);
 
-  // --- ALTERAÇÃO AQUI: DIRETO PARA ITENS ---
   const aoClicarNaFamilia = (familiaId: string, familiaNome: string) => {
     router.push({
-      pathname: '/itens', // Agora pula a tela de setup/area
+      pathname: '/itens', 
       params: { 
         familiaId: familiaId, 
         familiaNome: familiaNome 
@@ -61,7 +63,7 @@ export default function TelaInicial() {
             data={familias}
             keyExtractor={(item) => item.id.toString()}
             contentContainerStyle={{ 
-              paddingBottom: insets.bottom + 120 // Espaço para a Tab Bar Flutuante
+              paddingBottom: insets.bottom + 120 
             }}
             renderItem={({ item }) => (
               <TouchableOpacity 
@@ -80,6 +82,17 @@ export default function TelaInicial() {
           />
         )}
       </View>
+
+      {/* --- BOTÃO FLUTUANTE ADMIN (Canto Inferior Esquerdo) --- */}
+      {role === 'ADMIN' && (
+        <TouchableOpacity 
+          style={[styles.fabAdmin, { bottom: insets.bottom + 90 }]} // Ajuste de altura acima da tab bar
+          onPress={() => router.push('/admin')} // Agora aponta para o HUB
+          activeOpacity={0.8}
+        >
+          <Ionicons name="settings" size={26} color="#FFFFFF" />
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -117,4 +130,21 @@ const styles = StyleSheet.create({
   cardTag: { fontSize: 11, color: '#9CA3AF', fontWeight: 'bold', textTransform: 'uppercase' },
   cardTitle: { fontSize: 24, fontWeight: 'bold', color: '#1F2937' },
   cardDescription: { fontSize: 14, color: '#6B7280', marginTop: 4 },
+  
+  // --- ESTILOS DO FAB ADMIN ---
+  fabAdmin: {
+    position: 'absolute',
+    left: 20, // Canto Esquerdo
+    backgroundColor: '#1E3A8A', // Azul Tech
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 6, // Sombra no Android
+    shadowColor: '#000', // Sombra no iOS
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
 });

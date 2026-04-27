@@ -7,7 +7,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import * as FileSystem from 'expo-file-system/legacy'; 
 import { Buffer } from 'buffer';
+
+// IMPORTAÇÕES COM OS CAMINHOS CORRIGIDOS (Apenas um andar para trás)
 import { supabase } from '../src/supabase';
+import { useAuth } from '../src/context/AuthContext';
 
 const HeaderContagem = () => {
   const router = useRouter();
@@ -27,6 +30,9 @@ export default function TelaDeContagem() {
   const insets = useSafeAreaInsets();
   const cameraRef = useRef(null);
   
+  // PUXANDO O ID DA ORGANIZAÇÃO DO USUÁRIO
+  const { organizacao_id } = useAuth(); 
+
   const [localSelecionadoId, setLocalSelecionadoId] = useState(null);
   const [localSelecionadoNome, setLocalSelecionadoNome] = useState('');
   const [modalLocalVisivel, setModalLocalVisivel] = useState(false);
@@ -56,11 +62,16 @@ export default function TelaDeContagem() {
 
   useEffect(() => {
     async function buscarAreas() {
-      const { data } = await supabase.from('areas').select('*').order('nome');
+      if (!organizacao_id) return;
+      const { data } = await supabase
+        .from('areas')
+        .select('*')
+        .eq('organizacao_id', organizacao_id)
+        .order('nome');
       if (data) setAreasBd(data);
     }
     buscarAreas();
-  }, []);
+  }, [organizacao_id]);
 
   useEffect(() => {
     const paraNum = (valor: any) => {
@@ -79,7 +90,6 @@ export default function TelaDeContagem() {
     setPesoLiquido(saldoBalanca + emLinha);
   }, [numTubetes, taraTubete, numLaminas, numPaletes, pesoBruto, pesoEmLinha]);
 
-  // --- FUNÇÃO DA CÂMERA (QUE ESTAVA FALTANDO) ---
   const abrirCamera = async () => {
     if (!permission?.granted) {
       const { granted } = await requestPermission();
@@ -101,7 +111,6 @@ export default function TelaDeContagem() {
     }
   };
 
-  // --- LÓGICA DA CALCULADORA ---
   const adicionarAoCalculo = () => {
     if (!tempQtd || !tempPeso) return;
     setListaCalculo([...listaCalculo, { qtd: tempQtd, peso: tempPeso }]);
@@ -129,6 +138,7 @@ export default function TelaDeContagem() {
     const idFinal = params.areaId || localSelecionadoId;
     if (!idFinal) { Alert.alert("Atenção", "Selecione o local."); return; }
     if (pesoLiquido <= 0) { Alert.alert("Atenção", "O peso líquido deve ser maior que zero."); return; }
+    if (!organizacao_id) { Alert.alert("Erro de Autenticação", "Não foi possível identificar sua organização."); return; }
 
     setCarregando(true);
     try {
@@ -139,6 +149,7 @@ export default function TelaDeContagem() {
         await supabase.storage.from('fotos_contagem').upload(nomeArquivoFoto, Buffer.from(base64, 'base64'), { contentType: 'image/jpeg' });
       }
       const { error } = await supabase.from('contagens').insert([{
+        organizacao_id: organizacao_id,
         item_id: params.itemId,
         area_id: idFinal, 
         peso_bruto: parseFloat(pesoBruto.replace(',', '.')) || 0,
