@@ -1,4 +1,3 @@
-// app/(auth)/login.tsx - ATUALIZADO (Links Essenciais)
 import React, { useState } from 'react';
 import { 
   View, 
@@ -13,10 +12,9 @@ import {
   KeyboardAvoidingView, 
   Platform 
 } from 'react-native';
-import { supabase } from '../../src/supabase'; // AJUSTE O CAMINHO
-import { useRouter, Link } from 'expo-router'; // Importou 'Link'
+import { supabase } from '../../src/supabase'; 
+import { useRouter } from 'expo-router'; 
 
-// Cores Corporativas da vibe image_9.png / image_19.png / image_21.png
 const COLORS = {
   background: '#FAFAFA',
   industrialOrange: '#E6A23C',
@@ -25,7 +23,7 @@ const COLORS = {
   gray: '#666666',
   white: '#FFFFFF',
   border: '#DDDDDD',
-  textSubtle: '#888888', // Nova cor sutil
+  textSubtle: '#888888',
 };
 
 export default function LoginScreen() {
@@ -42,29 +40,18 @@ export default function LoginScreen() {
 
     setLoading(true);
     const { error } = await supabase.auth.signInWithPassword({
-      email: email,
+      email: email.trim(),
       password: password,
     });
 
     if (error) {
       Alert.alert('Erro de Login', error.message);
-      setEmail(''); // Limpa email pra UX casca grossa
-      setPassword(''); // Limpa senha
       setLoading(false);
-    } else {
-      console.log('Login efetuado com sucesso no Smart Count SaaS!');
     }
   }
 
-  // Funções de navegação (Comentadas até criarmos as telas)
   const handleForgotPassword = () => {
-    Alert.alert('Aviso', 'Fluxo de recuperação de senha será implementado em breve.');
-    // router.push('/(auth)/forgot-password');
-  };
-
-  const handleSignUp = () => {
-    Alert.alert('Aviso', 'Fluxo de cadastro será implementado em breve.');
-    // router.push('/(auth)/register');
+    Alert.alert('Recuperação de Senha', 'Procure o Administrador da sua unidade para resetar sua senha.');
   };
 
   return (
@@ -72,14 +59,12 @@ export default function LoginScreen() {
       <KeyboardAvoidingView 
         style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
         <View style={styles.container}>
           
-          {/* LOGO UNIFICADA E EMPILHADA */}
           <View style={styles.logoContainer}>
             <Image 
-              source={require('../../assets/images/sc_icon.png')} // AJUSTE O CAMINHO
+              source={require('../../assets/images/sc_icon.png')} 
               style={styles.logoIcon} 
               resizeMode="contain"
             />
@@ -90,8 +75,6 @@ export default function LoginScreen() {
           </View>
           
           <Text style={styles.title}>BEM-VINDO</Text>
-          <Text style={styles.subtitle}>Faça login para acessar seu inventário</Text>
-
           <TextInput
             style={styles.input}
             placeholder="E-mail"
@@ -100,7 +83,6 @@ export default function LoginScreen() {
             onChangeText={setEmail}
             autoCapitalize="none"
             keyboardType="email-address"
-            autoCorrect={false}
           />
 
           <TextInput
@@ -112,7 +94,6 @@ export default function LoginScreen() {
             secureTextEntry={true}
           />
 
-          {/* 🔗 LINK: Esqueci minha senha (Sutil e Azul Tech) */}
           <TouchableOpacity style={styles.forgotPasswordContainer} onPress={handleForgotPassword}>
             <Text style={styles.forgotPasswordText}>Esqueceu sua senha?</Text>
           </TouchableOpacity>
@@ -129,12 +110,29 @@ export default function LoginScreen() {
             )}
           </TouchableOpacity>
 
-          {/* 🔗 LINK: Cadastre-se (Integrado no final) */}
-          <View style={styles.signUpContainer}>
-            <Text style={styles.signUpText}>Não tem uma conta?</Text>
-            <TouchableOpacity onPress={handleSignUp}>
-              <Text style={styles.signUpLinkText}>Cadastre-se</Text>
+          {/* --- BLOCO DE LINKS PARA CADASTRO (SaaS) --- */}
+          <View style={styles.saasLinksContainer}>
+            
+            {/* Opção para o Conferente (Vínculo) */}
+            <TouchableOpacity 
+              style={styles.saasLinkItem} 
+              onPress={() => router.push('/(auth)/cadastro')}
+            >
+              <Text style={styles.saasLinkText}>Faz parte de uma empresa cadastrada?</Text>
+              <Text style={styles.saasLinkAction}>Entre por aqui.</Text>
             </TouchableOpacity>
+
+            <View style={styles.divider} />
+
+            {/* Opção para o Novo Admin (Criação de Org) */}
+            <TouchableOpacity 
+              style={styles.saasLinkItem} 
+              onPress={() => router.push('/(auth)/nova-empresa')}
+            >
+              <Text style={styles.saasLinkText}>Quer usar o Smart Count na sua empresa?</Text>
+              <Text style={styles.saasLinkAction}>Comece aqui.</Text>
+            </TouchableOpacity>
+
           </View>
 
           <Text style={styles.footer}>Blindagem SaaS Multi-tenant Ativada</Text>
@@ -145,56 +143,15 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  keyboardView: {
-    flex: 1,
-  },
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    padding: 30,
-  },
-  logoContainer: {
-    alignItems: 'center',
-    marginBottom: 40,
-  },
-  logoIcon: {
-    width: 90,
-    height: 90,
-    marginBottom: 20,
-  },
-  logoTextContainer: {
-    alignItems: 'center',
-  },
-  logoTextSmart: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: COLORS.industrialOrange,
-    textAlign: 'center',
-  },
-  logoTextCount: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: COLORS.techBlue,
-    textAlign: 'center',
-    marginTop: -2,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: COLORS.black,
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: COLORS.gray,
-    textAlign: 'center',
-    marginBottom: 35,
-  },
+  safeArea: { flex: 1, backgroundColor: COLORS.background },
+  keyboardView: { flex: 1 },
+  container: { flex: 1, justifyContent: 'center', padding: 30 },
+  logoContainer: { alignItems: 'center', marginBottom: 30 },
+  logoIcon: { width: 80, height: 80, marginBottom: 10 },
+  logoTextContainer: { alignItems: 'center' },
+  logoTextSmart: { fontSize: 24, fontWeight: 'bold', color: COLORS.industrialOrange },
+  logoTextCount: { fontSize: 24, fontWeight: 'bold', color: COLORS.techBlue, marginTop: -2 },
+  title: { fontSize: 20, fontWeight: 'bold', color: COLORS.black, textAlign: 'center', marginBottom: 25 },
   input: {
     height: 55,
     backgroundColor: COLORS.white,
@@ -206,57 +163,45 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: COLORS.black,
   },
-  
-  // NOVOS ESTILOS PARA OS LINKS
-  forgotPasswordContainer: {
-    alignSelf: 'flex-end', // Alinha à direita, embaixo da senha
-    marginBottom: 20,
-    marginTop: -5,        // Ajuste sutil para colar na senha
-  },
-  forgotPasswordText: {
-    color: COLORS.techBlue, // Azul Tech (segurança/corp)
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  
-  signUpContainer: {
-    flexDirection: 'row', // Exibe lado a lado
-    justifyContent: 'center',
-    marginTop: 25,
-    marginBottom: 20,     // Espaço antes do footer
-  },
-  signUpText: {
-    color: COLORS.textSubtle, // Cor sutil
-    fontSize: 15,
-  },
-  signUpLinkText: {
-    color: COLORS.industrialOrange, // Laranja Industrial (ação/dinamismo)
-    fontSize: 15,
-    fontWeight: 'bold',
-    marginLeft: 5,        // Pequeno espaço entre os textos
-  },
-  // FIM DOS NOVOS ESTILOS
-
+  forgotPasswordContainer: { alignSelf: 'flex-end', marginBottom: 20 },
+  forgotPasswordText: { color: COLORS.techBlue, fontSize: 13, fontWeight: '500' },
   button: {
     height: 55,
     backgroundColor: COLORS.industrialOrange,
     borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 5,
+    marginBottom: 30,
   },
-  buttonText: {
-    color: COLORS.white,
-    fontSize: 18,
-    fontWeight: 'bold',
+  buttonText: { color: COLORS.white, fontSize: 18, fontWeight: 'bold' },
+  
+  // ESTILOS DOS NOVOS LINKS SAAS
+  saasLinksContainer: {
+    marginTop: 10,
+    gap: 15,
   },
-  footer: {
-    position: 'absolute',
-    bottom: 20,
-    left: 0,
-    right: 0,
+  saasLinkItem: {
+    alignItems: 'center',
+    paddingVertical: 5,
+  },
+  saasLinkText: {
+    color: COLORS.textSubtle,
+    fontSize: 13,
     textAlign: 'center',
-    color: COLORS.gray,
-    fontSize: 12,
   },
+  saasLinkAction: {
+    color: COLORS.techBlue,
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginTop: 2,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: COLORS.border,
+    width: '60%',
+    alignSelf: 'center',
+    marginVertical: 5,
+  },
+  
+  footer: { position: 'absolute', bottom: 20, left: 0, right: 0, textAlign: 'center', color: COLORS.gray, fontSize: 11 },
 });
