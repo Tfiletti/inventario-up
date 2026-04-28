@@ -2,8 +2,13 @@ import React from 'react';
 import { Platform } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+// 1. IMPORTAÇÃO DA FERRAMENTA DE ÁREA SEGURA
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function TabLayout() {
+  // 2. LENDO O TAMANHO DOS BOTÕES DO SISTEMA
+  const insets = useSafeAreaInsets();
+
   return (
     <Tabs
       screenOptions={{
@@ -18,7 +23,8 @@ export default function TabLayout() {
         tabBarStyle: {
           // --- CONFIGURAÇÃO DA MARCA SMART COUNT (FLUTUANTE) ---
           position: 'absolute', 
-          bottom: Platform.OS === 'android' ? 20 : 30, // Recuo estratégico para fugir dos botões
+          // 3. A MÁGICA AQUI: Somamos o insets.bottom para empurrar a barra acima dos botões nativos
+          bottom: Platform.OS === 'android' ? 20 + insets.bottom : 30 + insets.bottom, 
           left: 20,
           right: 20,
           backgroundColor: '#FFFFFF',

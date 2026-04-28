@@ -4,11 +4,17 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { supabase } from '../src/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context'; 
+// 1. IMPORTANDO O CONTEXTO DE AUTENTICAÇÃO
+import { useAuth } from '../src/context/AuthContext'; 
 
 export default function TelaEditarContagem() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  
+  // 2. PEGANDO O ID DA ORGANIZAÇÃO DO USUÁRIO LOGADO
+  const { organizacao_id } = useAuth(); 
+  
   const [carregando, setCarregando] = useState(true);
   const [itemData, setItemData] = useState<any>(null);
 
@@ -32,8 +38,17 @@ export default function TelaEditarContagem() {
   };
 
   const carregarDados = async () => {
+    // Trava de segurança: se não tiver organização, nem tenta buscar
+    if (!organizacao_id) return; 
+
     try {
-      const { data, error } = await supabase.from('contagens').select('*, itens(descricao, codigo_sap)').eq('id', id).single();
+      const { data, error } = await supabase
+        .from('contagens')
+        .select('*, itens(descricao, codigo_sap)')
+        .eq('id', id)
+        .eq('organizacao_id', organizacao_id) // 3. FILTRO DE LEITURA
+        .single();
+        
       if (error) throw error;
       if (data) {
         setItemData(data);
@@ -50,10 +65,18 @@ export default function TelaEditarContagem() {
           setFotoUrl(urlData.publicUrl);
         }
       }
-    } catch (err: any) { console.error(err.message); } finally { setCarregando(false); }
+    } catch (err: any) { 
+      console.error(err.message); 
+      Alert.alert("Erro", "Não foi possível carregar os dados.");
+      router.back();
+    } finally { 
+      setCarregando(false); 
+    }
   };
 
-  useEffect(() => { carregarDados(); }, [id]);
+  useEffect(() => { 
+    carregarDados(); 
+  }, [id, organizacao_id]); // Atualiza se a organização mudar
 
   useEffect(() => {
     const paraNum = (v: any) => {
@@ -84,8 +107,14 @@ export default function TelaEditarContagem() {
     setListaCalculo([]);
   };
 
-  // --- FUNÇÃO EXCLUIR REGISTRO ---
+  // --- FUNÇÃO EXCLUIR COM "DEDO DURO" ---
   const excluir = () => {
+    // 1. Verifica se a organização sumiu
+    if (!organizacao_id) {
+      Alert.alert("Erro de Sessão", "O app perdeu o ID da sua organização.");
+      return;
+    }
+
     Alert.alert("🗑️ Excluir Registro", "Esta ação não pode ser desfeita. Deseja realmente apagar esta contagem?", [
       { text: "Cancelar", style: "cancel" },
       { 
@@ -93,25 +122,47 @@ export default function TelaEditarContagem() {
         style: "destructive", 
         onPress: async () => {
           try {
-            const { error } = await supabase.from('contagens').delete().eq('id', id);
+            const { data, error } = await supabase
+              .from('contagens')
+              .delete()
+              .eq('id', id)
+              .eq('organizacao_id', organizacao_id)
+              .select(); // <-- OBRIGA O BANCO A DEVOLVER O QUE FOI APAGADO
+              
             if (error) throw error;
+
+            // Se o array voltar vazio, o banco ignorou o comando
+            if (!data || data.length === 0) {
+              Alert.alert("Acesso Negado", "O registro não pôde ser excluído. Ou ele pertence a outra empresa, ou as regras de segurança (RLS) bloquearam a ação.");
+              return;
+            }
+
             Alert.alert("Sucesso", "Contagem excluída!");
             router.back();
           } catch (err: any) {
-            Alert.alert("Erro ao excluir", err.message);
+            // 2. Erro vindo direto do Banco
+            Alert.alert("Erro do Supabase (Excluir)", err.message);
           }
         } 
       }
     ]);
   };
 
+  // --- FUNÇÃO SALVAR COM "DEDO DURO" ---
   const salvar = async () => {
+    // 1. Verifica se a organização sumiu
+    if (!organizacao_id) {
+      Alert.alert("Erro de Sessão", "O app perdeu o ID da sua organização.");
+      return;
+    }
+
     if (pesoLiquido <= 0) {
       Alert.alert("Peso Inválido", "As alterações resultaram em um peso líquido final de zero ou negativo.");
       return;
     }
+    
     try {
-      const { error } = await supabase.from('contagens').update({
+      const { data, error } = await supabase.from('contagens').update({
         peso_bruto: parseFloat(pesoBruto.replace(',', '.')),
         em_linha: parseFloat(emLinha.replace(',', '.')),
         peso_liquido_calculado: pesoLiquido,
@@ -122,11 +173,25 @@ export default function TelaEditarContagem() {
           laminas: parseInt(laminas) || 0, 
           paletes: parseInt(paletes) || 0 
         }
-      }).eq('id', id);
+      })
+      .eq('id', id)
+      .eq('organizacao_id', organizacao_id)
+      .select(); // <-- OBRIGA O BANCO A DEVOLVER O DADO ATUALIZADO
+
       if (error) throw error;
+
+      // Se o array voltar vazio, a atualização falhou silenciosamente
+      if (!data || data.length === 0) {
+        Alert.alert("Bloqueado pelo Banco", "A edição foi ignorada. Motivos comuns: Você não tem permissão de UPDATE (RLS) ou o registro é muito antigo e não possui vínculo com sua organização.");
+        return;
+      }
+
       Alert.alert("Sucesso", "Registro atualizado!");
       router.back();
-    } catch (err: any) { Alert.alert("Erro ao salvar", err.message); }
+    } catch (err: any) { 
+      // 2. Erro vindo direto do Banco
+      Alert.alert("Erro do Supabase (Salvar)", err.message); 
+    }
   };
 
   if (carregando) return <ActivityIndicator size="large" color="#005b9f" style={{flex:1}} />;
@@ -139,7 +204,6 @@ export default function TelaEditarContagem() {
               <MaterialCommunityIcons name="package-variant" size={18} color="#B45309" />
               <Text style={styles.sapText}>{itemData?.itens?.codigo_sap || 'S/C'}</Text>
             </View>
-            {/* O BOTÃO AGORA CHAMA A FUNÇÃO EXCLUIR */}
             <TouchableOpacity onPress={excluir} style={styles.btnExcluir}>
                 <Ionicons name="trash-outline" size={26} color="#EF4444" />
             </TouchableOpacity>

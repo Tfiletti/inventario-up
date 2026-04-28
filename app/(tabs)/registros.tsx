@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { StyleSheet, Text, View, FlatList, ActivityIndicator, TouchableOpacity, RefreshControl, StatusBar } from 'react-native';
+import { StyleSheet, Text, View, FlatList, ActivityIndicator, TouchableOpacity, RefreshControl, StatusBar, TextInput } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons'; 
 import { supabase } from '../../src/supabase';
@@ -11,6 +11,10 @@ import { useAuth } from '../../src/context/AuthContext';
 export default function TelaRegistros() {
   const [registros, setRegistros] = useState<any[]>([]);
   const [carregando, setCarregando] = useState(true);
+  
+  // NOVA STATE: Guarda o que o usuário digitou na busca
+  const [busca, setBusca] = useState(''); 
+  
   const router = useRouter();
   const insets = useSafeAreaInsets(); 
   
@@ -70,20 +74,53 @@ export default function TelaRegistros() {
     }, [organizacao_id]) // Recarrega se o org_id mudar
   );
 
+  // LOGICA DO FILTRO LOCAL:
+  // Só mostra os registros que baterem com o texto da busca (por SAP ou Descrição)
+  const registrosFiltrados = registros.filter((item) => {
+    if (busca === '') return true; // Se a busca tá vazia, mostra tudo
+    
+    const termoBusca = busca.toLowerCase();
+    const sap = item.itens?.codigo_sap?.toLowerCase() || '';
+    const desc = item.itens?.descricao?.toLowerCase() || '';
+    
+    return sap.includes(termoBusca) || desc.includes(termoBusca);
+  });
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" />
       
-      {/* HEADER DINÂMICO */}
+      {/* HEADER DINÂMICO E BARRA DE BUSCA */}
       <View style={[styles.header, { paddingTop: insets.top + 15 }]}>
         <View style={styles.headerContent}>
             <Ionicons name="time-outline" size={16} color="#0369A1" />
             <Text style={styles.txtCiclo}> Ciclo: 05h às 05h ({obterFiltroTurno().exibicao})</Text>
         </View>
+
+        {/* --- CAMPO DE PESQUISA --- */}
+        <View style={styles.searchContainer}>
+          <Ionicons name="search" size={20} color="#94A3B8" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Buscar por código SAP ou descrição..."
+            placeholderTextColor="#94A3B8"
+            value={busca}
+            onChangeText={setBusca}
+            autoCorrect={false}
+          />
+          {busca.length > 0 && (
+            <TouchableOpacity onPress={() => setBusca('')}>
+              <Ionicons name="close-circle" size={20} color="#CBD5E1" />
+            </TouchableOpacity>
+          )}
+        </View>
+        {/* ------------------------- */}
+
       </View>
 
       <FlatList 
-        data={registros}
+        // Usando a lista filtrada em vez da lista crua
+        data={registrosFiltrados}
         keyExtractor={(item) => item.id.toString()}
         refreshControl={<RefreshControl refreshing={carregando} onRefresh={buscarRegistros} color="#005b9f" />}
         contentContainerStyle={{ 
@@ -133,7 +170,9 @@ export default function TelaRegistros() {
             !carregando ? (
                 <View style={styles.emptyContainer}>
                     <Ionicons name="search-outline" size={50} color="#CBD5E1" />
-                    <Text style={styles.emptyText}>Nenhuma contagem neste turno.</Text>
+                    <Text style={styles.emptyText}>
+                      {busca ? "Nenhum registro encontrado." : "Nenhuma contagem neste turno."}
+                    </Text>
                 </View>
             ) : null
         }
@@ -166,6 +205,24 @@ const styles = StyleSheet.create({
   },
   txtCiclo: { fontSize: 11, fontWeight: 'bold', color: '#0369A1' },
   
+  // Estilos da nova barra de pesquisa
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    marginTop: 15,
+    height: 45,
+  },
+  searchInput: {
+    flex: 1,
+    marginLeft: 10,
+    fontSize: 14,
+    color: '#1E293B',
+    fontWeight: '500',
+  },
+
   card: { 
     backgroundColor: '#FFF', 
     marginHorizontal: 16, 

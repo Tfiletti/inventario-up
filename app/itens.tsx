@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View, FlatList, ActivityIndicator, TouchableOpacity, StatusBar } from 'react-native';
+import { StyleSheet, Text, View, FlatList, ActivityIndicator, TouchableOpacity, StatusBar, TextInput } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../src/supabase';
@@ -19,21 +19,24 @@ const HeaderItens = ({ title, topInset }) => {
 };
 
 export default function TelaDeItens() {
-  // 1. AJUSTE: Pegando os nomes corretos vindos da tela de Famílias
   const { familiaId, familiaNome } = useLocalSearchParams();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  
   const [itens, setItens] = useState([]);
   const [carregando, setCarregando] = useState(true);
+  
+  // 1. NOVA STATE: Guarda o que o usuário digita
+  const [busca, setBusca] = useState('');
 
   useEffect(() => {
     async function buscarItens() {
-      if (!familiaId) return; // Segurança caso o ID não chegue
+      if (!familiaId) return; 
       
       const { data, error } = await supabase
         .from('itens')
         .select('*')
-        .eq('familia_id', familiaId) // 2. FILTRO: Usando o ID da família
+        .eq('familia_id', familiaId)
         .order('descricao');
         
       if (data) setItens(data);
@@ -49,15 +52,24 @@ export default function TelaDeItens() {
         itemId: item.id, 
         codigo: item.codigo_sap, 
         descricao: item.descricao,
-        // areaId e areaNome vão vazios, o conferente escolhe no modal lá dentro
       } 
     });
   };
 
+  // 2. FILTRO LOCAL: Busca instantânea sem bater no banco
+  const itensFiltrados = itens.filter((item: any) => {
+    if (busca === '') return true;
+    
+    const termoBusca = busca.toLowerCase();
+    const sap = item.codigo_sap?.toLowerCase() || '';
+    const desc = item.descricao?.toLowerCase() || '';
+    
+    return sap.includes(termoBusca) || desc.includes(termoBusca);
+  });
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
-      {/* 3. TÍTULO: Agora mostra o nome da Família no topo */}
       <HeaderItens 
         title={familiaNome || 'Materiais'} 
         topInset={insets.top} 
@@ -69,13 +81,31 @@ export default function TelaDeItens() {
             <Text style={styles.subtitle}> Selecione o item abaixo:</Text>
         </View>
 
+        {/* 3. CAMPO DE PESQUISA */}
+        <View style={styles.searchContainer}>
+          <Ionicons name="search" size={20} color="#94A3B8" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Buscar por código ou descrição..."
+            placeholderTextColor="#94A3B8"
+            value={busca}
+            onChangeText={setBusca}
+            autoCorrect={false}
+          />
+          {busca.length > 0 && (
+            <TouchableOpacity onPress={() => setBusca('')}>
+              <Ionicons name="close-circle" size={20} color="#CBD5E1" />
+            </TouchableOpacity>
+          )}
+        </View>
+
         {carregando ? (
           <ActivityIndicator size="large" color="#005b9f" style={{ marginTop: 50 }} />
         ) : (
           <FlatList
-            data={itens}
-            keyExtractor={(item) => item.id.toString()}
-            // 4. RESPIRO: Mantendo o espaço para a Tab Bar Flutuante
+            // 4. USANDO A LISTA FILTRADA
+            data={itensFiltrados}
+            keyExtractor={(item: any) => item.id.toString()}
             contentContainerStyle={{ paddingBottom: insets.bottom + 120 }}
             renderItem={({ item }) => (
               <TouchableOpacity 
@@ -95,7 +125,9 @@ export default function TelaDeItens() {
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
                 <Ionicons name="search-outline" size={40} color="#CBD5E1" />
-                <Text style={styles.emptyText}>Nenhum material encontrado para {familiaNome}.</Text>
+                <Text style={styles.emptyText}>
+                    {busca ? "Nenhum material encontrado." : `Nenhum material cadastrado em ${familiaNome}.`}
+                </Text>
               </View>
             }
           />
@@ -126,13 +158,33 @@ const styles = StyleSheet.create({
   subHeader: { 
     flexDirection: 'row', 
     alignItems: 'center', 
-    marginVertical: 15,
+    marginTop: 15,
+    marginBottom: 10,
     backgroundColor: '#E2E8F0',
     padding: 8,
     borderRadius: 8,
     alignSelf: 'flex-start'
   },
   subtitle: { fontSize: 13, color: '#475569', fontWeight: 'bold' },
+  
+  // ESTILOS DA BUSCA
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    marginBottom: 15,
+    height: 45,
+  },
+  searchInput: {
+    flex: 1,
+    marginLeft: 10,
+    fontSize: 14,
+    color: '#1E293B',
+    fontWeight: '500',
+  },
+
   cardItem: { 
     flexDirection: 'row', 
     alignItems: 'center', 

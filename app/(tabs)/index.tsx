@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View, FlatList, ActivityIndicator, TouchableOpacity, StatusBar } from 'react-native';
+import { StyleSheet, Text, View, FlatList, ActivityIndicator, TouchableOpacity, StatusBar, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../src/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,6 +24,8 @@ const HeaderHome = ({ topInset }: { topInset: number }) => (
 export default function TelaInicial() {
   const [familias, setFamilias] = useState([]);
   const [carregando, setCarregando] = useState(true);
+  const [busca, setBusca] = useState(''); // Estado da barra de pesquisa
+
   const router = useRouter();
   const insets = useSafeAreaInsets();
   
@@ -48,6 +50,14 @@ export default function TelaInicial() {
     });
   };
 
+  // Filtro local da barra de pesquisa
+  const familiasFiltradas = familias.filter((item: any) => {
+    if (busca === '') return true;
+    const termoBusca = busca.toLowerCase();
+    const nomeFamilia = item.nome?.toLowerCase() || '';
+    return nomeFamilia.includes(termoBusca);
+  });
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
@@ -56,12 +66,30 @@ export default function TelaInicial() {
       <View style={styles.content}>
         <Text style={styles.sectionTitle}>Selecione uma família:</Text>
 
+        {/* --- CAMPO DE PESQUISA --- */}
+        <View style={styles.searchContainer}>
+          <Ionicons name="search" size={20} color="#94A3B8" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Buscar família..."
+            placeholderTextColor="#94A3B8"
+            value={busca}
+            onChangeText={setBusca}
+            autoCorrect={false}
+          />
+          {busca.length > 0 && (
+            <TouchableOpacity onPress={() => setBusca('')}>
+              <Ionicons name="close-circle" size={20} color="#CBD5E1" />
+            </TouchableOpacity>
+          )}
+        </View>
+
         {carregando ? (
           <ActivityIndicator size="large" color="#005b9f" style={{ marginTop: 50 }} />
         ) : (
           <FlatList
-            data={familias}
-            keyExtractor={(item) => item.id.toString()}
+            data={familiasFiltradas} // Usa a lista filtrada
+            keyExtractor={(item: any) => item.id.toString()}
             contentContainerStyle={{ 
               paddingBottom: insets.bottom + 120 
             }}
@@ -79,6 +107,14 @@ export default function TelaInicial() {
                 <Text style={styles.cardDescription}>Materiais cadastrados para conferência</Text>
               </TouchableOpacity>
             )}
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Ionicons name="search-outline" size={40} color="#CBD5E1" />
+                <Text style={styles.emptyText}>
+                    {busca ? "Nenhuma família encontrada." : "Nenhuma família cadastrada."}
+                </Text>
+              </View>
+            }
           />
         )}
       </View>
@@ -86,8 +122,9 @@ export default function TelaInicial() {
       {/* --- BOTÃO FLUTUANTE ADMIN (Canto Inferior Esquerdo) --- */}
       {role === 'ADMIN' && (
         <TouchableOpacity 
-          style={[styles.fabAdmin, { bottom: insets.bottom + 90 }]} // Ajuste de altura acima da tab bar
-          onPress={() => router.push('/admin')} // Agora aponta para o HUB
+          // Ajustei o 'bottom' para 110, assim ele não fica "engolido" pela barra
+          style={[styles.fabAdmin, { bottom: insets.bottom + 110 }]} 
+          onPress={() => router.push('/admin')} 
           activeOpacity={0.8}
         >
           <Ionicons name="settings" size={26} color="#FFFFFF" />
@@ -116,7 +153,31 @@ const styles = StyleSheet.create({
   headerTitleContainer: { flex: 1, alignItems: 'flex-end' },
   headerTitle: { fontSize: 12, color: '#9CA3AF', fontWeight: 'bold', textTransform: 'uppercase' },
   content: { flex: 1, paddingHorizontal: 20, paddingTop: 20 },
-  sectionTitle: { fontSize: 20, color: '#111827', fontWeight: 'bold', marginBottom: 20 },
+  sectionTitle: { fontSize: 20, color: '#111827', fontWeight: 'bold', marginBottom: 15 },
+  
+  // Estilos da Barra de Pesquisa
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF', // Fundo branco para destacar no cinza
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    marginBottom: 20,
+    height: 50,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+  },
+  searchInput: {
+    flex: 1,
+    marginLeft: 10,
+    fontSize: 15,
+    color: '#1E293B',
+    fontWeight: '500',
+  },
+
   cardFamilias: { 
     backgroundColor: '#FFFFFF', 
     padding: 20, 
@@ -131,6 +192,9 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 24, fontWeight: 'bold', color: '#1F2937' },
   cardDescription: { fontSize: 14, color: '#6B7280', marginTop: 4 },
   
+  emptyContainer: { alignItems: 'center', marginTop: 50 },
+  emptyText: { textAlign: 'center', marginTop: 10, color: '#94A3B8', fontSize: 16 },
+
   // --- ESTILOS DO FAB ADMIN ---
   fabAdmin: {
     position: 'absolute',
