@@ -14,12 +14,12 @@ import { useAuth } from '../../src/context/AuthContext';
 // Ajuste das larguras das colunas para caber a lixeira
 const COL_ITEM = 3;
 const COL_FISICO = 2;
-const COL_SAP = 2;
+const COL_SISTEMA = 2; // <-- Renomeado
 const COL_DESVIO = 2;
 const COL_ACAO = 1;
 
 type SortConfig = {
-  key: 'id' | 'fisico' | 'sap' | 'desvio';
+  key: 'id' | 'fisico' | 'sistema' | 'desvio'; // <-- Renomeado
   direction: 'asc' | 'desc';
 }
 
@@ -65,14 +65,17 @@ export default function TelaDivergencia() {
     const mes = String(dataSelecionada.getMonth() + 1).padStart(2, '0');
     const dia = String(dataSelecionada.getDate()).padStart(2, '0');
     const dataLocalStr = `${ano}-${mes}-${dia}`;
-    const sapInicio = `${dataLocalStr}T00:00:00.000Z`;
-    const sapFim = `${dataLocalStr}T23:59:59.999Z`;
+    // <-- Renomeado variáveis locais
+    const sistemaInicio = `${dataLocalStr}T00:00:00.000Z`;
+    const sistemaFim = `${dataLocalStr}T23:59:59.999Z`;
 
     try {
+      // Nota: supervisor foi atualizado para responsavel na tabela itens no banco, mas como
+      // combinamos de manter as constantes/estados, aqui atualizo apenas a consulta:
       const { data: itens, error: errItens } = await supabase
         .from('itens')
         .select('id, descricao, preco_unitario')
-        .eq('supervisor', supervisorAtivo);
+        .eq('responsavel', supervisorAtivo);
 
       if (errItens) throw errItens;
 
@@ -86,45 +89,46 @@ export default function TelaDivergencia() {
 
       if (errCont) throw errCont;
 
-      // 4. Pegando a data_atualizacao do SAP também
-      const { data: estoqueSap, error: errSap } = await supabase
-        .from('estoque_sap')
-        .select('codigo_sap, saldo_sap, data_atualizacao')
+      // 4. Pegando a data_atualizacao do Sistema (Antigo SAP)
+      const { data: estoqueSistema, error: errSistema } = await supabase
+        .from('estoque_sistema') // <-- Atualizado
+        .select('sku_codigo, saldo_sistema, data_atualizacao') // <-- Atualizado
         .eq('organizacao_id', organizacao_id)
-        .gte('data_atualizacao', sapInicio)
-        .lte('data_atualizacao', sapFim);
+        .gte('data_atualizacao', sistemaInicio)
+        .lte('data_atualizacao', sistemaFim);
 
-      if (errSap) throw errSap;
+      if (errSistema) throw errSistema;
 
       const listaConsolidada = itens.map(item => {
         const itensFisicos = contagens?.filter(c => c.item_id === item.id) || [];
         const totalFisico = itensFisicos.reduce((acc, curr) => acc + (curr.peso_liquido_calculado || 0), 0);
         
-        const itensSapArr = estoqueSap?.filter(e => String(e.codigo_sap) === String(item.id)) || [];
-        const itemSap = itensSapArr[0];
-        const sap = itemSap ? (itemSap.saldo_sap || 0) : 0; 
+        // <-- Atualizado mapeamento
+        const itensSistemaArr = estoqueSistema?.filter(e => String(e.sku_codigo) === String(item.id)) || [];
+        const itemSistema = itensSistemaArr[0];
+        const saldoSistema = itemSistema ? (itemSistema.saldo_sistema || 0) : 0; 
         
-        const desvio = (totalFisico || 0) - sap;
+        const desvio = (totalFisico || 0) - saldoSistema;
         const impacto = desvio * (item.preco_unitario || 0);
 
-        // 5. Calcula o timestamp da última movimentação (Físico ou SAP) desse item
+        // 5. Calcula o timestamp da última movimentação (Físico ou Sistema) desse item
         let ultimaModificacao = 0;
         if (itensFisicos.length > 0) {
             ultimaModificacao = Math.max(...itensFisicos.map(c => new Date(c.data_hora).getTime()));
-        } else if (itensSapArr.length > 0) {
-            ultimaModificacao = Math.max(...itensSapArr.map(s => new Date(s.data_atualizacao).getTime()));
+        } else if (itensSistemaArr.length > 0) {
+            ultimaModificacao = Math.max(...itensSistemaArr.map(s => new Date(s.data_atualizacao).getTime()));
         }
 
         return {
           id: item.id,
           descricao: item.descricao,
           fisico: totalFisico || 0,
-          sap: sap,
+          sistema: saldoSistema, // <-- Renomeado
           desvio: desvio,
           impacto: impacto,
           ultimaModificacao: ultimaModificacao 
         };
-      }); // <-- REMOVIDO O FILTRO PARA MANTER OS ZERADOS NA LISTA
+      }); 
 
       setLista(listaConsolidada);
     } catch (err: any) {
@@ -200,7 +204,8 @@ export default function TelaDivergencia() {
 
     Alert.alert(
         "Zerar Contagem", 
-        `Deseja realmente apagar todo o registro Físico e SAP do item ${item.id} deste turno?\n\nEsta ação não pode ser desfeita.`, 
+        // <-- Atualizado o texto do alerta
+        `Deseja realmente apagar todo o registro Físico e Sistema do item ${item.id} deste turno?\n\nEsta ação não pode ser desfeita.`, 
         [
             { text: "Cancelar", style: "cancel" },
             { text: "Sim, Zerar Item", style: "destructive", onPress: () => executarExclusao(item) }
@@ -212,13 +217,13 @@ export default function TelaDivergencia() {
     setCarregando(true);
     const { inicio, fim } = obterFiltroTurno(dataSelecionada);
     
-    // Filtro para a tabela SAP (que usa YYYY-MM-DD apenas)
+    // Filtro para a tabela Sistema (que usa YYYY-MM-DD apenas)
     const ano = dataSelecionada.getFullYear();
     const mes = String(dataSelecionada.getMonth() + 1).padStart(2, '0');
     const dia = String(dataSelecionada.getDate()).padStart(2, '0');
     const dataLocalStr = `${ano}-${mes}-${dia}`;
-    const sapInicio = `${dataLocalStr}T00:00:00.000Z`;
-    const sapFim = `${dataLocalStr}T23:59:59.999Z`;
+    const sistemaInicio = `${dataLocalStr}T00:00:00.000Z`;
+    const sistemaFim = `${dataLocalStr}T23:59:59.999Z`;
 
     try {
         // 1. Apaga as Contagens Físicas
@@ -232,14 +237,14 @@ export default function TelaDivergencia() {
             
         if (err1) throw err1;
 
-        // 2. Apaga os Lançamentos de SAP
+        // 2. Apaga os Lançamentos do Sistema
         const { error: err2 } = await supabase
-            .from('estoque_sap')
+            .from('estoque_sistema') // <-- Atualizado
             .delete()
-            .eq('codigo_sap', item.id)
+            .eq('sku_codigo', item.id) // <-- Atualizado
             .eq('organizacao_id', organizacao_id)
-            .gte('data_atualizacao', sapInicio)
-            .lte('data_atualizacao', sapFim);
+            .gte('data_atualizacao', sistemaInicio)
+            .lte('data_atualizacao', sistemaFim);
 
         if (err2) throw err2;
 
@@ -253,9 +258,11 @@ export default function TelaDivergencia() {
 
   const exportarCSV = async () => {
     if (listaProcessada.length === 0) return;
-    let csv = "ITEM;DESCRICAO;FISICO;SAP;DESVIO;IMPACTO (R$)\n";
+    // <-- Atualizado cabeçalho do CSV
+    let csv = "ITEM;DESCRICAO;FISICO;SISTEMA;DESVIO;IMPACTO (R$)\n";
     listaProcessada.forEach(i => {
-      csv += `${i.id};${i.descricao?.replace(/;/g, ",")};${formatarPeso(i.fisico)};${formatarPeso(i.sap)};${formatarPeso(i.desvio)};${formatarPeso(i.impacto)}\n`;
+      // <-- Atualizado a propriedade
+      csv += `${i.id};${i.descricao?.replace(/;/g, ",")};${formatarPeso(i.fisico)};${formatarPeso(i.sistema)};${formatarPeso(i.desvio)};${formatarPeso(i.impacto)}\n`;
     });
     const uri = FileSystem.documentDirectory + `Divergencia_${supervisorAtivo}.csv`;
     await FileSystem.writeAsStringAsync(uri, csv, { encoding: FileSystem.EncodingType.UTF8 });
@@ -328,9 +335,10 @@ export default function TelaDivergencia() {
           {renderSortIcon('fisico')}
         </TouchableOpacity>
         
-        <TouchableOpacity style={[styles.headBtn, { flex: COL_SAP, justifyContent: 'center' }]} onPress={() => alternarOrdem('sap')}>
-          <Text style={styles.txtHead}>SAP</Text>
-          {renderSortIcon('sap')}
+        {/* <-- Renomeado a coluna do Header */}
+        <TouchableOpacity style={[styles.headBtn, { flex: COL_SISTEMA, justifyContent: 'center' }]} onPress={() => alternarOrdem('sistema')}>
+          <Text style={styles.txtHead}>Sistema</Text>
+          {renderSortIcon('sistema')}
         </TouchableOpacity>
         
         <TouchableOpacity style={[styles.headBtn, { flex: COL_DESVIO, justifyContent: 'flex-end' }]} onPress={() => alternarOrdem('desvio')}>
@@ -361,8 +369,9 @@ export default function TelaDivergencia() {
                 <Text style={styles.valFisico}>{formatarPeso(item.fisico)}</Text>
               </View>
 
-              <View style={{ flex: COL_SAP, alignItems: 'center' }}>
-                <Text style={styles.valSap}>{formatarPeso(item.sap)}</Text>
+              {/* <-- Atualizado a propriedade exibida e a classe de estilo */}
+              <View style={{ flex: COL_SISTEMA, alignItems: 'center' }}>
+                <Text style={styles.valSistema}>{formatarPeso(item.sistema)}</Text>
               </View>
 
               <View style={{ flex: COL_DESVIO, alignItems: 'flex-end', paddingRight: 5 }}>
@@ -381,7 +390,8 @@ export default function TelaDivergencia() {
               
               {/* BOTÃO EXCLUIR CONDICIONAL */}
               <View style={{ flex: COL_ACAO, alignItems: 'flex-end' }}>
-                {(item.fisico > 0 || item.sap > 0) && (
+                {/* <-- Atualizada propriedade */}
+                {(item.fisico > 0 || item.sistema > 0) && (
                   <TouchableOpacity onPress={() => confirmarExclusao(item)} style={styles.btnTrash}>
                     <Ionicons name="trash-outline" size={20} color="#CBD5E1" />
                   </TouchableOpacity>
@@ -448,7 +458,7 @@ const styles = StyleSheet.create({
   itemCode: { fontSize: 15, fontWeight: 'bold', color: '#005b9f' },
   itemDesc: { fontSize: 10, color: '#94A3B8', textTransform: 'uppercase', marginTop: 2 },
   valFisico: { fontSize: 14, fontWeight: 'bold', color: '#1E293B' },
-  valSap: { fontSize: 14, fontWeight: '600', color: '#64748B' },
+  valSistema: { fontSize: 14, fontWeight: '600', color: '#64748B' }, // <-- Estilo renomeado
   valDesvio: { fontSize: 14, fontWeight: 'bold' },
   valGrana: { fontSize: 10, fontWeight: 'bold', marginTop: 2 },
   btnTrash: { padding: 5 }, 

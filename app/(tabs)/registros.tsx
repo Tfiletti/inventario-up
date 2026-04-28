@@ -75,15 +75,16 @@ export default function TelaRegistros() {
   );
 
   // LOGICA DO FILTRO LOCAL:
-  // Só mostra os registros que baterem com o texto da busca (por SAP ou Descrição)
+  // Só mostra os registros que baterem com o texto da busca (por Código ou Descrição)
   const registrosFiltrados = registros.filter((item) => {
     if (busca === '') return true; // Se a busca tá vazia, mostra tudo
     
     const termoBusca = busca.toLowerCase();
-    const sap = item.itens?.codigo_sap?.toLowerCase() || '';
+    // <-- Atualizado para o novo nome da coluna
+    const codSistema = item.itens?.sku_codigo?.toLowerCase() || '';
     const desc = item.itens?.descricao?.toLowerCase() || '';
     
-    return sap.includes(termoBusca) || desc.includes(termoBusca);
+    return codSistema.includes(termoBusca) || desc.includes(termoBusca);
   });
 
   return (
@@ -102,7 +103,7 @@ export default function TelaRegistros() {
           <Ionicons name="search" size={20} color="#94A3B8" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Buscar por código SAP ou descrição..."
+            placeholder="Buscar por código ou descrição..." // <-- Atualizado
             placeholderTextColor="#94A3B8"
             value={busca}
             onChangeText={setBusca}
@@ -136,7 +137,8 @@ export default function TelaRegistros() {
             <View style={styles.cardHeader}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.txtArea}>📍 {item.areas?.nome || 'Sem Área'}</Text>
-                <Text style={styles.txtSap}>{item.itens?.codigo_sap}</Text>
+                {/* <-- Atualizado para puxar o sku_codigo e usar a nova classe de estilo */}
+                <Text style={styles.txtCodigoSistema}>{item.itens?.sku_codigo}</Text>
               </View>
               
               <View style={styles.statusIcons}>
@@ -248,7 +250,8 @@ const styles = StyleSheet.create({
   },
   txtArea: { fontSize: 11, fontWeight: 'bold', color: '#94A3B8', textTransform: 'uppercase', marginBottom: 2 },
   txtHora: { fontSize: 10, color: '#94A3B8', fontWeight: 'bold' },
-  txtSap: { fontSize: 18, fontWeight: 'bold', color: '#1E293B' },
+  // <-- Estilo renomeado para remover o termo antigo
+  txtCodigoSistema: { fontSize: 18, fontWeight: 'bold', color: '#1E293B' },
   
   cardBody: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 4 },
   txtDesc: { fontSize: 13, color: '#64748B', flex: 1, marginRight: 15, lineHeight: 18 },

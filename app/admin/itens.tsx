@@ -84,12 +84,11 @@ export default function ItensAdminScreen() {
 
     const dados = {
       organizacao_id,
-      codigo_sap: codigoErp.trim(),
+      sku_codigo: codigoErp.trim(), // <-- Atualizado banco
       descricao: descricao.trim(),
-      // Transforma a string vazia de volta para nulo pro banco aceitar
       familia_id: familiaId === '' ? null : familiaId, 
       unidade_medida: unidade,
-      supervisor: supervisor.trim() || null,
+      responsavel: supervisor.trim() || null, // <-- Atualizado banco
       preco_unitario: isNaN(precoTratado) ? 0 : precoTratado,
       usa_fator: usaFator,
       nome_embalagem: usaFator ? nomeEmbalagem.trim() : null,
@@ -162,11 +161,11 @@ export default function ItensAdminScreen() {
 
   const iniciarEdicao = (item: any) => {
     setEditandoId(item.id);
-    setCodigoErp(item.codigo_sap || '');
+    setCodigoErp(item.sku_codigo || ''); // <-- Atualizado
     setDescricao(item.descricao || '');
     setFamiliaId(item.familia_id || ''); // Garante string vazia se for null
     setUnidade(item.unidade_medida || 'UN');
-    setSupervisor(item.supervisor || '');
+    setSupervisor(item.responsavel || ''); // <-- Atualizado
     setPrecoUnitario(item.preco_unitario != null && item.preco_unitario !== 0 ? item.preco_unitario.toString().replace('.', ',') : '');
     setUsaFator(item.usa_fator || false);
     setNomeEmbalagem(item.nome_embalagem || '');
@@ -175,7 +174,7 @@ export default function ItensAdminScreen() {
 
   const itensFiltrados = itens.filter(i => {
     const descStr = i.descricao ? String(i.descricao).toLowerCase() : '';
-    const codStr = i.codigo_sap ? String(i.codigo_sap).toLowerCase() : '';
+    const codStr = i.sku_codigo ? String(i.sku_codigo).toLowerCase() : ''; // <-- Atualizado
     const filtroLimpo = filtro.toLowerCase();
     return descStr.includes(filtroLimpo) || codStr.includes(filtroLimpo);
   });
@@ -312,7 +311,8 @@ export default function ItensAdminScreen() {
             renderItem={({ item }) => (
               <View style={styles.itemCard}>
                 <View style={styles.itemInfo}>
-                  <Text style={styles.itemCode}>{String(item.codigo_sap || 'S/C')} • {String(item.supervisor || 'S/ Resp.')}</Text>
+                  {/* <-- Atualizado na renderização visual */}
+                  <Text style={styles.itemCode}>{String(item.sku_codigo || 'S/C')} • {String(item.responsavel || 'S/ Resp.')}</Text>
                   <Text style={styles.itemName} numberOfLines={1}>{String(item.descricao || 'Sem descrição')}</Text>
                 </View>
                 

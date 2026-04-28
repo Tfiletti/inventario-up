@@ -26,7 +26,6 @@ export default function TelaDeItens() {
   const [itens, setItens] = useState([]);
   const [carregando, setCarregando] = useState(true);
   
-  // 1. NOVA STATE: Guarda o que o usuário digita
   const [busca, setBusca] = useState('');
 
   useEffect(() => {
@@ -50,21 +49,21 @@ export default function TelaDeItens() {
       pathname: '/contar', 
       params: { 
         itemId: item.id, 
-        codigo: item.codigo_sap, 
+        codigo: item.sku_codigo, // <-- Atualizado para o novo nome do banco
         descricao: item.descricao,
       } 
     });
   };
 
-  // 2. FILTRO LOCAL: Busca instantânea sem bater no banco
   const itensFiltrados = itens.filter((item: any) => {
     if (busca === '') return true;
     
     const termoBusca = busca.toLowerCase();
-    const sap = item.codigo_sap?.toLowerCase() || '';
+    // <-- Atualizado para o novo nome da coluna
+    const codSistema = item.sku_codigo?.toLowerCase() || ''; 
     const desc = item.descricao?.toLowerCase() || '';
     
-    return sap.includes(termoBusca) || desc.includes(termoBusca);
+    return codSistema.includes(termoBusca) || desc.includes(termoBusca);
   });
 
   return (
@@ -81,7 +80,6 @@ export default function TelaDeItens() {
             <Text style={styles.subtitle}> Selecione o item abaixo:</Text>
         </View>
 
-        {/* 3. CAMPO DE PESQUISA */}
         <View style={styles.searchContainer}>
           <Ionicons name="search" size={20} color="#94A3B8" />
           <TextInput
@@ -103,7 +101,6 @@ export default function TelaDeItens() {
           <ActivityIndicator size="large" color="#005b9f" style={{ marginTop: 50 }} />
         ) : (
           <FlatList
-            // 4. USANDO A LISTA FILTRADA
             data={itensFiltrados}
             keyExtractor={(item: any) => item.id.toString()}
             contentContainerStyle={{ paddingBottom: insets.bottom + 120 }}
@@ -114,7 +111,8 @@ export default function TelaDeItens() {
                 activeOpacity={0.7}
               >
                 <View style={styles.cardItemBody}>
-                  <Text style={styles.codigoSap}>{item.codigo_sap}</Text>
+                  {/* <-- Atualizado para exibir o sku_codigo e usar o novo estilo */}
+                  <Text style={styles.codigoSistema}>{item.sku_codigo}</Text>
                   <Text style={styles.descricao} numberOfLines={2}>{item.descricao}</Text>
                 </View>
                 <View style={styles.iconContainer}>
@@ -167,7 +165,6 @@ const styles = StyleSheet.create({
   },
   subtitle: { fontSize: 13, color: '#475569', fontWeight: 'bold' },
   
-  // ESTILOS DA BUSCA
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -201,7 +198,8 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
   },
   cardItemBody: { flex: 1 },
-  codigoSap: { fontSize: 20, fontWeight: 'bold', color: '#005b9f' },
+  // <-- Estilo renomeado para manter a coerência
+  codigoSistema: { fontSize: 20, fontWeight: 'bold', color: '#005b9f' },
   descricao: { fontSize: 14, color: '#64748B', marginTop: 4, textTransform: 'uppercase' },
   iconContainer: {
     backgroundColor: '#F0F9FF',

@@ -57,7 +57,8 @@ export default function TelaEditarContagem() {
     try {
       const { data, error } = await supabase
         .from('contagens')
-        .select('*, itens(descricao, codigo_sap)')
+        // <-- Atualizado para buscar sku_codigo em vez do código antigo
+        .select('*, itens(descricao, sku_codigo)') 
         .eq('id', id)
         .eq('organizacao_id', organizacao_id) 
         .single();
@@ -190,9 +191,10 @@ export default function TelaEditarContagem() {
     <View style={styles.container}>
       <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 120 }]}>
         <View style={styles.header}>
-            <View style={styles.sapBadge}>
+            <View style={styles.badgeSistema}>
               <MaterialCommunityIcons name="package-variant" size={18} color="#B45309" />
-              <Text style={styles.sapText}>{itemData?.itens?.codigo_sap || 'S/C'}</Text>
+              {/* <-- Atualizado para exibir sku_codigo */}
+              <Text style={styles.textoSistema}>{itemData?.itens?.sku_codigo || 'S/C'}</Text>
             </View>
             <TouchableOpacity onPress={excluir} style={styles.btnExcluir}>
                 <Ionicons name="trash-outline" size={26} color="#EF4444" />
@@ -283,8 +285,9 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8F9FA' },
   scroll: { padding: 15, paddingTop: 50 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
-  sapBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#E9ECEF', padding: 10, borderRadius: 12 },
-  sapText: { marginLeft: 5, fontWeight: 'bold', fontSize: 18, color: '#1E293B' },
+  // <-- Estilos renomeados
+  badgeSistema: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#E9ECEF', padding: 10, borderRadius: 12 },
+  textoSistema: { marginLeft: 5, fontWeight: 'bold', fontSize: 18, color: '#1E293B' },
   btnExcluir: { padding: 8 },
   itemDesc: { fontSize: 14, color: '#6C757D', fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
