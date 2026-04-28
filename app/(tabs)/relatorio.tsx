@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import { StyleSheet, Text, View, FlatList, TouchableOpacity, ActivityIndicator, Alert, ScrollView, TextInput } from 'react-native';
+import { StyleSheet, Text, View, FlatList, TouchableOpacity, ActivityIndicator, Alert, ScrollView, TextInput, Image } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { supabase } from '../../src/supabase'; 
 import * as FileSystem from 'expo-file-system';
@@ -8,36 +8,40 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context'; 
 
-// 1. IMPORTANDO O CRACHÁ (SaaS e Papel do Usuário)
+// IMPORTAÇÃO DO CONTEXTO DE AUTENTICAÇÃO
 import { useAuth } from '../../src/context/AuthContext'; 
 
-// Ajuste das larguras das colunas para caber a lixeira
+// Configuração de larguras das colunas
 const COL_ITEM = 3;
 const COL_FISICO = 2;
-const COL_SISTEMA = 2; // <-- Renomeado
+const COL_SISTEMA = 2; 
 const COL_DESVIO = 2;
 const COL_ACAO = 1;
 
+const AZUL_TECH = '#1E3A8A';
+
 type SortConfig = {
-  key: 'id' | 'fisico' | 'sistema' | 'desvio'; // <-- Renomeado
+  key: 'id' | 'fisico' | 'sistema' | 'desvio';
   direction: 'asc' | 'desc';
 }
 
-export default function TelaDivergencia() {
+export default function TelaConsultaSaldos() {
   const insets = useSafeAreaInsets();
-  
-  // 2. PEGANDO OS DADOS DO USUÁRIO LOGADO
   const { organizacao_id, role } = useAuth(); 
 
   const [dataSelecionada, setDataSelecionada] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [supervisorAtivo, setSupervisorAtivo] = useState('Edevandro');
+  
+  // 1. PADRÃO INICIAL ALTERADO PARA 'Todos'
+  const [supervisorAtivo, setSupervisorAtivo] = useState('Todos');
+  
   const [lista, setLista] = useState<any[]>([]);
   const [carregando, setCarregando] = useState(true);
   
   const [busca, setBusca] = useState('');
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'desvio', direction: 'desc' });
 
+  // Lista de responsáveis (Botão 'Todos' será adicionado manualmente na interface)
   const supervisores = ['Edevandro', 'Everaldo', 'Fabio', 'Joel', 'Marcelo', 'Samuel'];
 
   const formatarPeso = (valor: number) => {
@@ -57,29 +61,30 @@ export default function TelaDivergencia() {
   };
 
   const buscarDados = async () => {
-    if (!organizacao_id) return; // Trava SaaS
+    if (!organizacao_id) return; 
 
     setCarregando(true);
     const { inicio, fim } = obterFiltroTurno(dataSelecionada);
-    const ano = dataSelecionada.getFullYear();
-    const mes = String(dataSelecionada.getMonth() + 1).padStart(2, '0');
-    const dia = String(dataSelecionada.getDate()).padStart(2, '0');
-    const dataLocalStr = `${ano}-${mes}-${dia}`;
-    // <-- Renomeado variáveis locais
-    const sistemaInicio = `${dataLocalStr}T00:00:00.000Z`;
-    const sistemaFim = `${dataLocalStr}T23:59:59.999Z`;
+    const dataIso = dataSelecionada.toISOString().split('T')[0];
+    const sistemaInicio = `${dataIso}T00:00:00.000Z`;
+    const sistemaFim = `${dataIso}T23:59:59.999Z`;
 
     try {
-      // Nota: supervisor foi atualizado para responsavel na tabela itens no banco, mas como
-      // combinamos de manter as constantes/estados, aqui atualizo apenas a consulta:
-      const { data: itens, error: errItens } = await supabase
+      // 2. LÓGICA DE FILTRO DINÂMICA
+      let query = supabase
         .from('itens')
         .select('id, descricao, preco_unitario')
-        .eq('responsavel', supervisorAtivo);
+        .eq('organizacao_id', organizacao_id);
+
+      // Se não for 'Todos', aplica o filtro do responsável
+      if (supervisorAtivo !== 'Todos') {
+        query = query.eq('responsavel', supervisorAtivo);
+      }
+
+      const { data: itens, error: errItens } = await query;
 
       if (errItens) throw errItens;
 
-      // 3. Pegando a data_hora da contagem para saber a idade do registro
       const { data: contagens, error: errCont } = await supabase
         .from('contagens')
         .select('item_id, peso_liquido_calculado, data_hora')
@@ -89,10 +94,9 @@ export default function TelaDivergencia() {
 
       if (errCont) throw errCont;
 
-      // 4. Pegando a data_atualizacao do Sistema (Antigo SAP)
       const { data: estoqueSistema, error: errSistema } = await supabase
-        .from('estoque_sistema') // <-- Atualizado
-        .select('sku_codigo, saldo_sistema, data_atualizacao') // <-- Atualizado
+        .from('estoque_sistema') 
+        .select('sku_codigo, saldo_sistema, data_atualizacao') 
         .eq('organizacao_id', organizacao_id)
         .gte('data_atualizacao', sistemaInicio)
         .lte('data_atualizacao', sistemaFim);
@@ -103,15 +107,13 @@ export default function TelaDivergencia() {
         const itensFisicos = contagens?.filter(c => c.item_id === item.id) || [];
         const totalFisico = itensFisicos.reduce((acc, curr) => acc + (curr.peso_liquido_calculado || 0), 0);
         
-        // <-- Atualizado mapeamento
         const itensSistemaArr = estoqueSistema?.filter(e => String(e.sku_codigo) === String(item.id)) || [];
         const itemSistema = itensSistemaArr[0];
         const saldoSistema = itemSistema ? (itemSistema.saldo_sistema || 0) : 0; 
         
-        const desvio = (totalFisico || 0) - saldoSistema;
+        const desvio = totalFisico - saldoSistema;
         const impacto = desvio * (item.preco_unitario || 0);
 
-        // 5. Calcula o timestamp da última movimentação (Físico ou Sistema) desse item
         let ultimaModificacao = 0;
         if (itensFisicos.length > 0) {
             ultimaModificacao = Math.max(...itensFisicos.map(c => new Date(c.data_hora).getTime()));
@@ -122,8 +124,8 @@ export default function TelaDivergencia() {
         return {
           id: item.id,
           descricao: item.descricao,
-          fisico: totalFisico || 0,
-          sistema: saldoSistema, // <-- Renomeado
+          fisico: totalFisico,
+          sistema: saldoSistema, 
           desvio: desvio,
           impacto: impacto,
           ultimaModificacao: ultimaModificacao 
@@ -178,7 +180,7 @@ export default function TelaDivergencia() {
 
   const renderSortIcon = (key: SortConfig['key']) => {
     if (sortConfig.key !== key) return <Ionicons name="swap-vertical" size={12} color="#CBD5E1" />;
-    return <Ionicons name={sortConfig.direction === 'asc' ? "arrow-up" : "arrow-down"} size={12} color="#005b9f" />;
+    return <Ionicons name={sortConfig.direction === 'asc' ? "arrow-up" : "arrow-down"} size={12} color={AZUL_TECH} />;
   };
 
   const onChangeDate = (event: any, selectedDate?: Date) => {
@@ -186,70 +188,35 @@ export default function TelaDivergencia() {
     if (selectedDate) setDataSelecionada(selectedDate);
   };
 
-  // --- REGRA DE EXCLUSÃO (5 HORAS OU ADMIN) ---
   const confirmarExclusao = (item: any) => {
     if (!organizacao_id) return;
-
     const cincoHorasEmMs = 5 * 60 * 60 * 1000;
     const tempoDecorrido = Date.now() - item.ultimaModificacao;
 
-    // Se passou de 5 horas E não é admin, bloqueia.
     if (tempoDecorrido > cincoHorasEmMs && role !== 'ADMIN') {
-        Alert.alert(
-            "⏳ Tempo Expirado", 
-            "O prazo de 5 horas para exclusão deste registro expirou. Apenas o Administrador pode apagar esta contagem agora."
-        );
+        Alert.alert("⏳ Tempo Expirado", "O prazo de 5 horas para exclusão expirou. Apenas o Administrador pode apagar este registro.");
         return;
     }
 
-    Alert.alert(
-        "Zerar Contagem", 
-        // <-- Atualizado o texto do alerta
-        `Deseja realmente apagar todo o registro Físico e Sistema do item ${item.id} deste turno?\n\nEsta ação não pode ser desfeita.`, 
-        [
-            { text: "Cancelar", style: "cancel" },
-            { text: "Sim, Zerar Item", style: "destructive", onPress: () => executarExclusao(item) }
-        ]
-    );
+    Alert.alert("Zerar Contagem", `Deseja apagar os registros de Físico e Sistema do item ${item.id}?`, [
+        { text: "Cancelar", style: "cancel" },
+        { text: "Sim, Zerar", style: "destructive", onPress: () => executarExclusao(item) }
+    ]);
   };
 
   const executarExclusao = async (item: any) => {
     setCarregando(true);
     const { inicio, fim } = obterFiltroTurno(dataSelecionada);
-    
-    // Filtro para a tabela Sistema (que usa YYYY-MM-DD apenas)
-    const ano = dataSelecionada.getFullYear();
-    const mes = String(dataSelecionada.getMonth() + 1).padStart(2, '0');
-    const dia = String(dataSelecionada.getDate()).padStart(2, '0');
-    const dataLocalStr = `${ano}-${mes}-${dia}`;
-    const sistemaInicio = `${dataLocalStr}T00:00:00.000Z`;
-    const sistemaFim = `${dataLocalStr}T23:59:59.999Z`;
+    const dataIso = dataSelecionada.toISOString().split('T')[0];
+    const sistemaInicio = `${dataIso}T00:00:00.000Z`;
+    const sistemaFim = `${dataIso}T23:59:59.999Z`;
 
     try {
-        // 1. Apaga as Contagens Físicas
-        const { error: err1 } = await supabase
-            .from('contagens')
-            .delete()
-            .eq('item_id', item.id)
-            .eq('organizacao_id', organizacao_id)
-            .gte('data_hora', inicio)
-            .lt('data_hora', fim);
-            
-        if (err1) throw err1;
+        await supabase.from('contagens').delete().eq('item_id', item.id).eq('organizacao_id', organizacao_id).gte('data_hora', inicio).lt('data_hora', fim);
+        await supabase.from('estoque_sistema').delete().eq('sku_codigo', item.id).eq('organizacao_id', organizacao_id).gte('data_atualizacao', sistemaInicio).lte('data_atualizacao', sistemaFim);
 
-        // 2. Apaga os Lançamentos do Sistema
-        const { error: err2 } = await supabase
-            .from('estoque_sistema') // <-- Atualizado
-            .delete()
-            .eq('sku_codigo', item.id) // <-- Atualizado
-            .eq('organizacao_id', organizacao_id)
-            .gte('data_atualizacao', sistemaInicio)
-            .lte('data_atualizacao', sistemaFim);
-
-        if (err2) throw err2;
-
-        Alert.alert("Sucesso", "Registros zerados! Você já pode recontar este item.");
-        buscarDados(); // Recarrega a tela instantaneamente
+        Alert.alert("Sucesso", "Registros zerados!");
+        buscarDados(); 
     } catch (error: any) {
         Alert.alert("Erro ao excluir", error.message);
         setCarregando(false);
@@ -258,13 +225,11 @@ export default function TelaDivergencia() {
 
   const exportarCSV = async () => {
     if (listaProcessada.length === 0) return;
-    // <-- Atualizado cabeçalho do CSV
     let csv = "ITEM;DESCRICAO;FISICO;SISTEMA;DESVIO;IMPACTO (R$)\n";
     listaProcessada.forEach(i => {
-      // <-- Atualizado a propriedade
       csv += `${i.id};${i.descricao?.replace(/;/g, ",")};${formatarPeso(i.fisico)};${formatarPeso(i.sistema)};${formatarPeso(i.desvio)};${formatarPeso(i.impacto)}\n`;
     });
-    const uri = FileSystem.documentDirectory + `Divergencia_${supervisorAtivo}.csv`;
+    const uri = FileSystem.documentDirectory + `Consulta_Inventarios_${supervisorAtivo}.csv`;
     await FileSystem.writeAsStringAsync(uri, csv, { encoding: FileSystem.EncodingType.UTF8 });
     await Sharing.shareAsync(uri);
   };
@@ -272,7 +237,14 @@ export default function TelaDivergencia() {
   return (
     <View style={styles.container}>
       <View style={styles.headerAzul}>
-        <Text style={styles.titlePrincipal}>Divergência de Inventário</Text>
+        <View style={styles.logoTitleRow}>
+          <Image 
+            source={require('../../assets/images/sc_icon.png')} 
+            style={styles.tinyLogo} 
+            resizeMode="contain"
+          />
+          <Text style={styles.titlePrincipal}>Consulta de Inventários</Text>
+        </View>
         
         <View style={styles.searchBar}>
           <Ionicons name="search" size={18} color="#94A3B8" />
@@ -312,6 +284,15 @@ export default function TelaDivergencia() {
 
       <View style={styles.containerSupervisores}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 15 }}>
+          
+          {/* 3. BOTÃO 'TODOS' ADICIONADO MANUALMENTE */}
+          <TouchableOpacity 
+              onPress={() => { setSupervisorAtivo('Todos'); setBusca(''); }}
+              style={[styles.badge, supervisorAtivo === 'Todos' && styles.badgeAtivo]}
+          >
+            <Text style={[styles.txtBadge, supervisorAtivo === 'Todos' && styles.txtBadgeAtivo]}>Todos</Text>
+          </TouchableOpacity>
+
           {supervisores.map(sup => (
             <TouchableOpacity 
               key={sup} 
@@ -329,30 +310,23 @@ export default function TelaDivergencia() {
           <Text style={styles.txtHead}>Item</Text>
           {renderSortIcon('id')}
         </TouchableOpacity>
-        
         <TouchableOpacity style={[styles.headBtn, { flex: COL_FISICO, justifyContent: 'center' }]} onPress={() => alternarOrdem('fisico')}>
           <Text style={styles.txtHead}>Físico</Text>
           {renderSortIcon('fisico')}
         </TouchableOpacity>
-        
-        {/* <-- Renomeado a coluna do Header */}
         <TouchableOpacity style={[styles.headBtn, { flex: COL_SISTEMA, justifyContent: 'center' }]} onPress={() => alternarOrdem('sistema')}>
           <Text style={styles.txtHead}>Sistema</Text>
           {renderSortIcon('sistema')}
         </TouchableOpacity>
-        
         <TouchableOpacity style={[styles.headBtn, { flex: COL_DESVIO, justifyContent: 'flex-end' }]} onPress={() => alternarOrdem('desvio')}>
           <Text style={styles.txtHead}>Desvio</Text>
           {renderSortIcon('desvio')}
         </TouchableOpacity>
-        
-        <View style={{ flex: COL_ACAO, alignItems: 'flex-end' }}>
-             {/* Coluna reservada para o botão de apagar */}
-        </View>
+        <View style={{ flex: COL_ACAO }} />
       </View>
 
       {carregando ? (
-        <ActivityIndicator size="large" color="#005b9f" style={{ marginTop: 50 }} />
+        <ActivityIndicator size="large" color={AZUL_TECH} style={{ marginTop: 50 }} />
       ) : (
         <FlatList
           data={listaProcessada} 
@@ -364,16 +338,12 @@ export default function TelaDivergencia() {
                 <Text style={styles.itemCode}>{item.id}</Text>
                 <Text style={styles.itemDesc} numberOfLines={1}>{item.descricao}</Text>
               </View>
-
               <View style={{ flex: COL_FISICO, alignItems: 'center' }}>
                 <Text style={styles.valFisico}>{formatarPeso(item.fisico)}</Text>
               </View>
-
-              {/* <-- Atualizado a propriedade exibida e a classe de estilo */}
               <View style={{ flex: COL_SISTEMA, alignItems: 'center' }}>
                 <Text style={styles.valSistema}>{formatarPeso(item.sistema)}</Text>
               </View>
-
               <View style={{ flex: COL_DESVIO, alignItems: 'flex-end', paddingRight: 5 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   {item.desvio !== 0 && (
@@ -387,10 +357,7 @@ export default function TelaDivergencia() {
                   {formatarMoedaManual(item.impacto)}
                 </Text>
               </View>
-              
-              {/* BOTÃO EXCLUIR CONDICIONAL */}
               <View style={{ flex: COL_ACAO, alignItems: 'flex-end' }}>
-                {/* <-- Atualizada propriedade */}
                 {(item.fisico > 0 || item.sistema > 0) && (
                   <TouchableOpacity onPress={() => confirmarExclusao(item)} style={styles.btnTrash}>
                     <Ionicons name="trash-outline" size={20} color="#CBD5E1" />
@@ -408,57 +375,30 @@ export default function TelaDivergencia() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFF' },
-  headerAzul: { backgroundColor: '#005b9f', paddingTop: 60, paddingBottom: 20, paddingHorizontal: 20 },
-  titlePrincipal: { fontSize: 22, fontWeight: 'bold', color: '#FFF', marginBottom: 15 },
-  searchBar: {
-    backgroundColor: '#FFF',
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    height: 45,
-    marginBottom: 15
-  },
+  headerAzul: { backgroundColor: AZUL_TECH, paddingTop: 55, paddingBottom: 20, paddingHorizontal: 20 },
+  logoTitleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 15, gap: 10 },
+  tinyLogo: { width: 30, height: 30 },
+  titlePrincipal: { fontSize: 20, fontWeight: 'bold', color: '#FFF' },
+  searchBar: { backgroundColor: '#FFF', flexDirection: 'row', alignItems: 'center', borderRadius: 12, paddingHorizontal: 12, height: 45, marginBottom: 15 },
   inputBusca: { flex: 1, marginLeft: 10, fontSize: 14, color: '#1E293B' },
-  barraFiltro: { 
-    backgroundColor: 'rgba(255,255,255,0.15)', 
-    borderRadius: 12, 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'space-between',
-    padding: 10 
-  },
+  barraFiltro: { backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 10 },
   dataContainer: { flexDirection: 'row', alignItems: 'center', padding: 4 },
   txtData: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginLeft: 10 },
   acoesHeader: { flexDirection: 'row', gap: 15 },
   iconBtn: { padding: 2 },
   containerSupervisores: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
   badge: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 12, backgroundColor: '#F1F5F9', marginRight: 8 },
-  badgeAtivo: { backgroundColor: '#005b9f' },
+  badgeAtivo: { backgroundColor: AZUL_TECH },
   txtBadge: { fontSize: 14, fontWeight: 'bold', color: '#64748B' },
   txtBadgeAtivo: { color: '#FFF' },
-  tableHeader: { 
-    flexDirection: 'row', 
-    paddingHorizontal: 15, 
-    paddingVertical: 12, 
-    backgroundColor: '#F8FAFC',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E2E8F0'
-  },
+  tableHeader: { flexDirection: 'row', paddingHorizontal: 15, paddingVertical: 12, backgroundColor: '#F8FAFC', borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
   headBtn: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   txtHead: { fontSize: 11, fontWeight: '900', color: '#94A3B8', textTransform: 'uppercase' },
-  row: { 
-    flexDirection: 'row', 
-    paddingHorizontal: 15, 
-    paddingVertical: 16, 
-    borderBottomWidth: 1, 
-    borderBottomColor: '#F1F5F9',
-    alignItems: 'center' 
-  },
-  itemCode: { fontSize: 15, fontWeight: 'bold', color: '#005b9f' },
+  row: { flexDirection: 'row', paddingHorizontal: 15, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#F1F5F9', alignItems: 'center' },
+  itemCode: { fontSize: 15, fontWeight: 'bold', color: AZUL_TECH },
   itemDesc: { fontSize: 10, color: '#94A3B8', textTransform: 'uppercase', marginTop: 2 },
   valFisico: { fontSize: 14, fontWeight: 'bold', color: '#1E293B' },
-  valSistema: { fontSize: 14, fontWeight: '600', color: '#64748B' }, // <-- Estilo renomeado
+  valSistema: { fontSize: 14, fontWeight: '600', color: '#64748B' }, 
   valDesvio: { fontSize: 14, fontWeight: 'bold' },
   valGrana: { fontSize: 10, fontWeight: 'bold', marginTop: 2 },
   btnTrash: { padding: 5 }, 
