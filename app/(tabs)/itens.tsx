@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, FlatList, ActivityIndicator, TouchableOpacity, StatusBar, TextInput } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../src/supabase';
+import { supabase } from '../../src/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const HeaderItens = ({ title, topInset }) => {

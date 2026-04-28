@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react'; // Adicionado useMemo
+import React, { useState, useCallback, useMemo } from 'react';
 import { StyleSheet, Text, View, FlatList, TouchableOpacity, ActivityIndicator, Alert, ScrollView, TextInput } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { supabase } from '../../src/supabase'; 
@@ -8,10 +8,15 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context'; 
 
-const COL_ITEM = 3.5;
+// 1. IMPORTANDO O CRACHÁ (SaaS e Papel do Usuário)
+import { useAuth } from '../../src/context/AuthContext'; 
+
+// Ajuste das larguras das colunas para caber a lixeira
+const COL_ITEM = 3;
 const COL_FISICO = 2;
 const COL_SAP = 2;
-const COL_DESVIO = 2.5;
+const COL_DESVIO = 2;
+const COL_ACAO = 1;
 
 type SortConfig = {
   key: 'id' | 'fisico' | 'sap' | 'desvio';
@@ -20,13 +25,16 @@ type SortConfig = {
 
 export default function TelaDivergencia() {
   const insets = useSafeAreaInsets();
+  
+  // 2. PEGANDO OS DADOS DO USUÁRIO LOGADO
+  const { organizacao_id, role } = useAuth(); 
+
   const [dataSelecionada, setDataSelecionada] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [supervisorAtivo, setSupervisorAtivo] = useState('Edevandro');
   const [lista, setLista] = useState<any[]>([]);
   const [carregando, setCarregando] = useState(true);
   
-  // NOVOS ESTADOS: Busca e Ordenação
   const [busca, setBusca] = useState('');
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'desvio', direction: 'desc' });
 
@@ -49,6 +57,8 @@ export default function TelaDivergencia() {
   };
 
   const buscarDados = async () => {
+    if (!organizacao_id) return; // Trava SaaS
+
     setCarregando(true);
     const { inicio, fim } = obterFiltroTurno(dataSelecionada);
     const ano = dataSelecionada.getFullYear();
@@ -66,31 +76,44 @@ export default function TelaDivergencia() {
 
       if (errItens) throw errItens;
 
+      // 3. Pegando a data_hora da contagem para saber a idade do registro
       const { data: contagens, error: errCont } = await supabase
         .from('contagens')
-        .select('item_id, peso_liquido_calculado')
+        .select('item_id, peso_liquido_calculado, data_hora')
+        .eq('organizacao_id', organizacao_id)
         .gte('data_hora', inicio)
         .lt('data_hora', fim);
 
       if (errCont) throw errCont;
 
+      // 4. Pegando a data_atualizacao do SAP também
       const { data: estoqueSap, error: errSap } = await supabase
         .from('estoque_sap')
-        .select('codigo_sap, saldo_sap')
+        .select('codigo_sap, saldo_sap, data_atualizacao')
+        .eq('organizacao_id', organizacao_id)
         .gte('data_atualizacao', sapInicio)
         .lte('data_atualizacao', sapFim);
 
       if (errSap) throw errSap;
 
       const listaConsolidada = itens.map(item => {
-        const totalFisico = contagens
-          ?.filter(c => c.item_id === item.id)
-          .reduce((acc, curr) => acc + (curr.peso_liquido_calculado || 0), 0);
-
-        const itemSap = estoqueSap?.find(e => String(e.codigo_sap) === String(item.id));
+        const itensFisicos = contagens?.filter(c => c.item_id === item.id) || [];
+        const totalFisico = itensFisicos.reduce((acc, curr) => acc + (curr.peso_liquido_calculado || 0), 0);
+        
+        const itensSapArr = estoqueSap?.filter(e => String(e.codigo_sap) === String(item.id)) || [];
+        const itemSap = itensSapArr[0];
         const sap = itemSap ? (itemSap.saldo_sap || 0) : 0; 
+        
         const desvio = (totalFisico || 0) - sap;
         const impacto = desvio * (item.preco_unitario || 0);
+
+        // 5. Calcula o timestamp da última movimentação (Físico ou SAP) desse item
+        let ultimaModificacao = 0;
+        if (itensFisicos.length > 0) {
+            ultimaModificacao = Math.max(...itensFisicos.map(c => new Date(c.data_hora).getTime()));
+        } else if (itensSapArr.length > 0) {
+            ultimaModificacao = Math.max(...itensSapArr.map(s => new Date(s.data_atualizacao).getTime()));
+        }
 
         return {
           id: item.id,
@@ -98,9 +121,10 @@ export default function TelaDivergencia() {
           fisico: totalFisico || 0,
           sap: sap,
           desvio: desvio,
-          impacto: impacto
+          impacto: impacto,
+          ultimaModificacao: ultimaModificacao 
         };
-      });
+      }); // <-- REMOVIDO O FILTRO PARA MANTER OS ZERADOS NA LISTA
 
       setLista(listaConsolidada);
     } catch (err: any) {
@@ -113,14 +137,12 @@ export default function TelaDivergencia() {
   useFocusEffect(
     useCallback(() => {
       buscarDados();
-    }, [supervisorAtivo, dataSelecionada])
+    }, [supervisorAtivo, dataSelecionada, organizacao_id])
   );
 
-  // LÓGICA DE FILTRAGEM E ORDENAÇÃO (Processamento Local)
   const listaProcessada = useMemo(() => {
     let resultado = [...lista];
 
-    // Filtro de Busca
     if (busca) {
       const termo = busca.toLowerCase();
       resultado = resultado.filter(i => 
@@ -129,22 +151,17 @@ export default function TelaDivergencia() {
       );
     }
 
-    // Ordenação
     if (sortConfig.key) {
       resultado.sort((a, b) => {
         let valA = a[sortConfig.key];
         let valB = b[sortConfig.key];
-        
-        // Tratar strings para comparação correta
         if (typeof valA === 'string') valA = valA.toLowerCase();
         if (typeof valB === 'string') valB = valB.toLowerCase();
-
         if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
         if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
         return 0;
       });
     }
-
     return resultado;
   }, [lista, busca, sortConfig]);
 
@@ -165,6 +182,75 @@ export default function TelaDivergencia() {
     if (selectedDate) setDataSelecionada(selectedDate);
   };
 
+  // --- REGRA DE EXCLUSÃO (5 HORAS OU ADMIN) ---
+  const confirmarExclusao = (item: any) => {
+    if (!organizacao_id) return;
+
+    const cincoHorasEmMs = 5 * 60 * 60 * 1000;
+    const tempoDecorrido = Date.now() - item.ultimaModificacao;
+
+    // Se passou de 5 horas E não é admin, bloqueia.
+    if (tempoDecorrido > cincoHorasEmMs && role !== 'ADMIN') {
+        Alert.alert(
+            "⏳ Tempo Expirado", 
+            "O prazo de 5 horas para exclusão deste registro expirou. Apenas o Administrador pode apagar esta contagem agora."
+        );
+        return;
+    }
+
+    Alert.alert(
+        "Zerar Contagem", 
+        `Deseja realmente apagar todo o registro Físico e SAP do item ${item.id} deste turno?\n\nEsta ação não pode ser desfeita.`, 
+        [
+            { text: "Cancelar", style: "cancel" },
+            { text: "Sim, Zerar Item", style: "destructive", onPress: () => executarExclusao(item) }
+        ]
+    );
+  };
+
+  const executarExclusao = async (item: any) => {
+    setCarregando(true);
+    const { inicio, fim } = obterFiltroTurno(dataSelecionada);
+    
+    // Filtro para a tabela SAP (que usa YYYY-MM-DD apenas)
+    const ano = dataSelecionada.getFullYear();
+    const mes = String(dataSelecionada.getMonth() + 1).padStart(2, '0');
+    const dia = String(dataSelecionada.getDate()).padStart(2, '0');
+    const dataLocalStr = `${ano}-${mes}-${dia}`;
+    const sapInicio = `${dataLocalStr}T00:00:00.000Z`;
+    const sapFim = `${dataLocalStr}T23:59:59.999Z`;
+
+    try {
+        // 1. Apaga as Contagens Físicas
+        const { error: err1 } = await supabase
+            .from('contagens')
+            .delete()
+            .eq('item_id', item.id)
+            .eq('organizacao_id', organizacao_id)
+            .gte('data_hora', inicio)
+            .lt('data_hora', fim);
+            
+        if (err1) throw err1;
+
+        // 2. Apaga os Lançamentos de SAP
+        const { error: err2 } = await supabase
+            .from('estoque_sap')
+            .delete()
+            .eq('codigo_sap', item.id)
+            .eq('organizacao_id', organizacao_id)
+            .gte('data_atualizacao', sapInicio)
+            .lte('data_atualizacao', sapFim);
+
+        if (err2) throw err2;
+
+        Alert.alert("Sucesso", "Registros zerados! Você já pode recontar este item.");
+        buscarDados(); // Recarrega a tela instantaneamente
+    } catch (error: any) {
+        Alert.alert("Erro ao excluir", error.message);
+        setCarregando(false);
+    }
+  };
+
   const exportarCSV = async () => {
     if (listaProcessada.length === 0) return;
     let csv = "ITEM;DESCRICAO;FISICO;SAP;DESVIO;IMPACTO (R$)\n";
@@ -181,7 +267,6 @@ export default function TelaDivergencia() {
       <View style={styles.headerAzul}>
         <Text style={styles.titlePrincipal}>Divergência de Inventário</Text>
         
-        {/* BARRA DE BUSCA */}
         <View style={styles.searchBar}>
           <Ionicons name="search" size={18} color="#94A3B8" />
           <TextInput 
@@ -232,7 +317,6 @@ export default function TelaDivergencia() {
         </ScrollView>
       </View>
 
-      {/* CABEÇALHO COM CLIQUE PARA ORDENAR */}
       <View style={styles.tableHeader}>
         <TouchableOpacity style={[styles.headBtn, { flex: COL_ITEM }]} onPress={() => alternarOrdem('id')}>
           <Text style={styles.txtHead}>Item</Text>
@@ -253,13 +337,17 @@ export default function TelaDivergencia() {
           <Text style={styles.txtHead}>Desvio</Text>
           {renderSortIcon('desvio')}
         </TouchableOpacity>
+        
+        <View style={{ flex: COL_ACAO, alignItems: 'flex-end' }}>
+             {/* Coluna reservada para o botão de apagar */}
+        </View>
       </View>
 
       {carregando ? (
         <ActivityIndicator size="large" color="#005b9f" style={{ marginTop: 50 }} />
       ) : (
         <FlatList
-          data={listaProcessada} // Usa a lista filtrada e ordenada
+          data={listaProcessada} 
           keyExtractor={item => item.id}
           contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
           renderItem={({ item }) => (
@@ -277,7 +365,7 @@ export default function TelaDivergencia() {
                 <Text style={styles.valSap}>{formatarPeso(item.sap)}</Text>
               </View>
 
-              <View style={{ flex: COL_DESVIO, alignItems: 'flex-end' }}>
+              <View style={{ flex: COL_DESVIO, alignItems: 'flex-end', paddingRight: 5 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   {item.desvio !== 0 && (
                     <Ionicons name="alert-circle" size={14} color={item.desvio < 0 ? "#EF4444" : "#F59E0B"} style={{ marginRight: 4 }} />
@@ -289,6 +377,15 @@ export default function TelaDivergencia() {
                 <Text style={[styles.valGrana, { color: item.impacto < 0 ? '#EF4444' : '#64748B' }]}>
                   {formatarMoedaManual(item.impacto)}
                 </Text>
+              </View>
+              
+              {/* BOTÃO EXCLUIR CONDICIONAL */}
+              <View style={{ flex: COL_ACAO, alignItems: 'flex-end' }}>
+                {(item.fisico > 0 || item.sap > 0) && (
+                  <TouchableOpacity onPress={() => confirmarExclusao(item)} style={styles.btnTrash}>
+                    <Ionicons name="trash-outline" size={20} color="#CBD5E1" />
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
           )}
@@ -332,7 +429,7 @@ const styles = StyleSheet.create({
   txtBadgeAtivo: { color: '#FFF' },
   tableHeader: { 
     flexDirection: 'row', 
-    paddingHorizontal: 20, 
+    paddingHorizontal: 15, 
     paddingVertical: 12, 
     backgroundColor: '#F8FAFC',
     borderBottomWidth: 1,
@@ -342,7 +439,7 @@ const styles = StyleSheet.create({
   txtHead: { fontSize: 11, fontWeight: '900', color: '#94A3B8', textTransform: 'uppercase' },
   row: { 
     flexDirection: 'row', 
-    paddingHorizontal: 20, 
+    paddingHorizontal: 15, 
     paddingVertical: 16, 
     borderBottomWidth: 1, 
     borderBottomColor: '#F1F5F9',
@@ -353,6 +450,7 @@ const styles = StyleSheet.create({
   valFisico: { fontSize: 14, fontWeight: 'bold', color: '#1E293B' },
   valSap: { fontSize: 14, fontWeight: '600', color: '#64748B' },
   valDesvio: { fontSize: 14, fontWeight: 'bold' },
-  valGrana: { fontSize: 10, fontWeight: 'bold', marginTop: 2 }, 
+  valGrana: { fontSize: 10, fontWeight: 'bold', marginTop: 2 },
+  btnTrash: { padding: 5 }, 
   emptyText: { textAlign: 'center', marginTop: 40, color: '#94A3B8' }
 });

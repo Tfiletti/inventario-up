@@ -4,15 +4,12 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { supabase } from '../src/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context'; 
-// 1. IMPORTANDO O CONTEXTO DE AUTENTICAÇÃO
 import { useAuth } from '../src/context/AuthContext'; 
 
 export default function TelaEditarContagem() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  
-  // 2. PEGANDO O ID DA ORGANIZAÇÃO DO USUÁRIO LOGADO
   const { organizacao_id } = useAuth(); 
   
   const [carregando, setCarregando] = useState(true);
@@ -33,12 +30,28 @@ export default function TelaEditarContagem() {
   const [tempQtd, setTempQtd] = useState('');
   const [tempPeso, setTempPeso] = useState('');
 
+  // Formata para exibição visual (ex: 1.234,56)
   const formatarPeso = (valor: number) => {
     return valor.toFixed(2).replace('.', ',').replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1.');
   };
 
+  // --- FUNÇÃO DE CONVERSÃO INTELIGENTE ---
+  const lerNumero = (valor: any) => {
+    if (valor === '' || valor === null || valor === undefined) return 0;
+    let str = String(valor).trim();
+
+    // Se tiver vírgula, tratamos como formato BR (ponto é milhar, vírgula é decimal)
+    if (str.includes(',')) {
+      str = str.replace(/\./g, ''); // Remove pontos de milhar
+      str = str.replace(',', '.');  // Transforma vírgula em decimal
+    } 
+    // Se não tiver vírgula mas tiver ponto, verificamos se é decimal do banco (ex: 10.50)
+    // Em contextos de peso, um ponto único costuma ser decimal.
+    
+    return parseFloat(str) || 0;
+  };
+
   const carregarDados = async () => {
-    // Trava de segurança: se não tiver organização, nem tenta buscar
     if (!organizacao_id) return; 
 
     try {
@@ -46,19 +59,22 @@ export default function TelaEditarContagem() {
         .from('contagens')
         .select('*, itens(descricao, codigo_sap)')
         .eq('id', id)
-        .eq('organizacao_id', organizacao_id) // 3. FILTRO DE LEITURA
+        .eq('organizacao_id', organizacao_id) 
         .single();
         
       if (error) throw error;
       if (data) {
         setItemData(data);
         const detalhes = data.detalhes_contagem || {};
+        
         setTubetes(detalhes.tubetes || 0);
-        setTara(String(detalhes.tara_tubete || '0'));
+        // Ao carregar, já convertemos o ponto do banco para vírgula para o utilizador
+        setTara(String(detalhes.tara_tubete || '0').replace('.', ','));
         setLaminas(detalhes.laminas || 0);
         setPaletes(detalhes.paletes || 0);
-        setPesoBruto(String(data.peso_bruto || '0'));
-        setEmLinha(String(data.em_linha || '0'));
+        setPesoBruto(String(data.peso_bruto || '0').replace('.', ','));
+        setEmLinha(String(data.em_linha || '0').replace('.', ','));
+        
         setObs(data.observacao || '');
         if (data.foto_url) {
           const { data: urlData } = supabase.storage.from('fotos_contagem').getPublicUrl(data.foto_url);
@@ -76,19 +92,16 @@ export default function TelaEditarContagem() {
 
   useEffect(() => { 
     carregarDados(); 
-  }, [id, organizacao_id]); // Atualiza se a organização mudar
+  }, [id, organizacao_id]); 
 
   useEffect(() => {
-    const paraNum = (v: any) => {
-      if (v === '' || v === null || v === undefined) return 0;
-      return parseFloat(v.toString().replace(',', '.')) || 0;
-    };
-    const bruto = paraNum(pesoBruto);
-    const taraUni = paraNum(tara);
-    const nTub = paraNum(tubetes);
-    const nLam = paraNum(laminas);
-    const nPal = paraNum(paletes);
-    const somaLinha = paraNum(emLinha);
+    const bruto = lerNumero(pesoBruto);
+    const taraUni = lerNumero(tara);
+    const nTub = lerNumero(tubetes);
+    const nLam = lerNumero(laminas);
+    const nPal = lerNumero(paletes);
+    const somaLinha = lerNumero(emLinha);
+    
     const descontoTaras = (nTub * taraUni) + (nLam * 0.4) + (nPal * 20);
     const saldoBalanca = Math.max(0, bruto - descontoTaras);
     setPesoLiquido(saldoBalanca + somaLinha);
@@ -101,21 +114,16 @@ export default function TelaEditarContagem() {
   };
 
   const confirmarCalculo = () => {
-    const total = listaCalculo.reduce((acc, i) => acc + (parseFloat(i.qtd.replace(',','.')) * parseFloat(i.peso.replace(',','.'))), 0);
+    const total = listaCalculo.reduce((acc, i) => acc + (lerNumero(i.qtd) * lerNumero(i.peso)), 0);
     setEmLinha(total.toFixed(2).replace('.', ','));
     setModalCalcVisivel(false);
     setListaCalculo([]);
   };
 
-  // --- FUNÇÃO EXCLUIR COM "DEDO DURO" ---
   const excluir = () => {
-    // 1. Verifica se a organização sumiu
-    if (!organizacao_id) {
-      Alert.alert("Erro de Sessão", "O app perdeu o ID da sua organização.");
-      return;
-    }
+    if (!organizacao_id) return;
 
-    Alert.alert("🗑️ Excluir Registro", "Esta ação não pode ser desfeita. Deseja realmente apagar esta contagem?", [
+    Alert.alert("🗑️ Excluir Registro", "Deseja apagar esta contagem?", [
       { text: "Cancelar", style: "cancel" },
       { 
         text: "Excluir", 
@@ -127,70 +135,52 @@ export default function TelaEditarContagem() {
               .delete()
               .eq('id', id)
               .eq('organizacao_id', organizacao_id)
-              .select(); // <-- OBRIGA O BANCO A DEVOLVER O QUE FOI APAGADO
+              .select(); 
               
             if (error) throw error;
-
-            // Se o array voltar vazio, o banco ignorou o comando
-            if (!data || data.length === 0) {
-              Alert.alert("Acesso Negado", "O registro não pôde ser excluído. Ou ele pertence a outra empresa, ou as regras de segurança (RLS) bloquearam a ação.");
-              return;
-            }
+            if (!data || data.length === 0) throw new Error("Registro não encontrado.");
 
             Alert.alert("Sucesso", "Contagem excluída!");
             router.back();
           } catch (err: any) {
-            // 2. Erro vindo direto do Banco
-            Alert.alert("Erro do Supabase (Excluir)", err.message);
+            Alert.alert("Erro ao excluir", err.message);
           }
         } 
       }
     ]);
   };
 
-  // --- FUNÇÃO SALVAR COM "DEDO DURO" ---
   const salvar = async () => {
-    // 1. Verifica se a organização sumiu
-    if (!organizacao_id) {
-      Alert.alert("Erro de Sessão", "O app perdeu o ID da sua organização.");
-      return;
-    }
-
+    if (!organizacao_id) return;
     if (pesoLiquido <= 0) {
-      Alert.alert("Peso Inválido", "As alterações resultaram em um peso líquido final de zero ou negativo.");
+      Alert.alert("Peso Inválido", "O peso líquido final não pode ser zero ou negativo.");
       return;
     }
     
     try {
       const { data, error } = await supabase.from('contagens').update({
-        peso_bruto: parseFloat(pesoBruto.replace(',', '.')),
-        em_linha: parseFloat(emLinha.replace(',', '.')),
+        peso_bruto: lerNumero(pesoBruto),
+        em_linha: lerNumero(emLinha),
         peso_liquido_calculado: pesoLiquido,
         observacao: obs,
         detalhes_contagem: { 
           tubetes: parseInt(tubetes) || 0, 
-          tara_tubete: parseFloat(tara.replace(',', '.')) || 0, 
+          tara_tubete: lerNumero(tara), 
           laminas: parseInt(laminas) || 0, 
           paletes: parseInt(paletes) || 0 
         }
       })
       .eq('id', id)
       .eq('organizacao_id', organizacao_id)
-      .select(); // <-- OBRIGA O BANCO A DEVOLVER O DADO ATUALIZADO
+      .select();
 
       if (error) throw error;
-
-      // Se o array voltar vazio, a atualização falhou silenciosamente
-      if (!data || data.length === 0) {
-        Alert.alert("Bloqueado pelo Banco", "A edição foi ignorada. Motivos comuns: Você não tem permissão de UPDATE (RLS) ou o registro é muito antigo e não possui vínculo com sua organização.");
-        return;
-      }
+      if (!data || data.length === 0) throw new Error("Falha na atualização.");
 
       Alert.alert("Sucesso", "Registro atualizado!");
       router.back();
     } catch (err: any) { 
-      // 2. Erro vindo direto do Banco
-      Alert.alert("Erro do Supabase (Salvar)", err.message); 
+      Alert.alert("Erro ao salvar", err.message); 
     }
   };
 
@@ -221,7 +211,7 @@ export default function TelaEditarContagem() {
                 <Text style={styles.cardLabel}>Em Linha:</Text>
                 <TouchableOpacity onPress={() => setModalCalcVisivel(true)} style={styles.btnCalcAbre}><MaterialCommunityIcons name="calculator" size={18} color="#10B981" /></TouchableOpacity>
             </View>
-            <TextInput style={styles.cardInput} value={emLinha} onChangeText={setEmLinha} keyboardType="numeric" selectTextOnFocus />
+            <TextInput style={styles.cardInput} value={String(emLinha)} onChangeText={setEmLinha} keyboardType="numeric" selectTextOnFocus />
           </View>
         </View>
 
@@ -255,13 +245,13 @@ export default function TelaEditarContagem() {
             <View style={styles.listaScrollArea}>
                 <FlatList data={listaCalculo} keyExtractor={(_, index) => index.toString()} renderItem={({ item, index }) => (
                     <View style={styles.linhaCalculo}>
-                        <Text style={styles.txtLinha}>{item.qtd} × {item.peso}kg = {(parseFloat(item.qtd.replace(',','.')) * parseFloat(item.peso.replace(',','.'))).toFixed(2)} kg</Text>
+                        <Text style={styles.txtLinha}>{item.qtd} × {item.peso}kg = {(lerNumero(item.qtd) * lerNumero(item.peso)).toFixed(2)} kg</Text>
                         <TouchableOpacity onPress={() => { const nl = [...listaCalculo]; nl.splice(index, 1); setListaCalculo(nl); }}><Ionicons name="trash-outline" size={18} color="#EF4444" /></TouchableOpacity>
                     </View>
                 )} ListEmptyComponent={<Text style={styles.txtVazio}>Nenhum item somado</Text>} />
             </View>
             <View style={styles.calcFooter}>
-                <View><Text style={styles.labelTotalCalc}>TOTAL ACUMULADO:</Text><Text style={styles.valTotalCalc}>{listaCalculo.reduce((acc, i) => acc + (parseFloat(i.qtd.replace(',','.')) * parseFloat(i.peso.replace(',','.'))), 0).toFixed(2)} kg</Text></View>
+                <View><Text style={styles.labelTotalCalc}>TOTAL ACUMULADO:</Text><Text style={styles.valTotalCalc}>{listaCalculo.reduce((acc, i) => acc + (lerNumero(i.qtd) * lerNumero(i.peso)), 0).toFixed(2)} kg</Text></View>
                 <TouchableOpacity style={styles.btnConfirmarCalc} onPress={confirmarCalculo}><Text style={styles.txtConfirmar}>OK</Text></TouchableOpacity>
             </View>
           </View>
@@ -276,7 +266,7 @@ const CardStepper = ({ label, value, onAdd, onSub, onChangeText }: any) => (
       <Text style={styles.cardLabel}>{label}:</Text>
       <View style={styles.stepper}>
           <TouchableOpacity onPress={onSub} style={styles.stepBtnContainer}><Text style={styles.stepBtn}>-</Text></TouchableOpacity>
-          <TextInput style={styles.stepInput} value={String(value)} onChangeText={onChangeText} keyboardType="numeric" selectTextOnFocus onBlur={() => { if (value === '') onChangeText('0'); }} />
+          <TextInput style={styles.stepInput} value={String(value)} onChangeText={onChangeText} keyboardType="numeric" selectTextOnFocus />
           <TouchableOpacity onPress={onAdd} style={styles.stepBtnContainer}><Text style={styles.stepBtn}>+</Text></TouchableOpacity>
       </View>
     </View>
@@ -285,7 +275,7 @@ const CardStepper = ({ label, value, onAdd, onSub, onChangeText }: any) => (
 const CardInput = ({ label, value, onChange, color }: any) => (
     <View style={[styles.card, { borderLeftWidth: 4, borderLeftColor: color }]}>
       <Text style={styles.cardLabel}>{label}:</Text>
-      <TextInput style={styles.cardInput} value={value} onChangeText={onChange} keyboardType="numeric" selectTextOnFocus />
+      <TextInput style={styles.cardInput} value={String(value)} onChangeText={onChange} keyboardType="numeric" selectTextOnFocus />
     </View>
 );
 
